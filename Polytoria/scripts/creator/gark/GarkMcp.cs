@@ -70,7 +70,8 @@ internal sealed class GarkMcpProtocol(IGarkMcpHost host)
 	private static readonly (string Uri, string Name, string Title, string Description, string MimeType)[] StaticResources =
 	[
 		("polytoria://guide/workflow", "workflow", "Gark workflow", "How to use the Polytoria Creator tools well.", "text/markdown"),
-		("polytoria://guide/coordinates", "coordinates", "Polytoria coordinates and rotations", "Y-up axes, +Z forward, degrees, world vs local transforms, primitive axes.", "text/markdown"),
+		("polytoria://guide/coordinates", "coordinates", "Polytoria coordinates and rotations", "Y-up axes, +Z forward, viewer-relative handedness, degrees, world vs local transforms, primitive axes.", "text/markdown"),
+		("polytoria://guide/building", "building", "Polytoria scale, text, collision and data", "Player dimensions and movement, Text3D orientation and sizing, collision layer bitmasks, datastore limits and property replication.", "text/markdown"),
 		("polytoria://guide/ui", "ui", "Polytoria UI layout", "PlayerGUI hierarchy and the Offset/Relative/Pivot layout model.", "text/markdown"),
 		("polytoria://api/polytoria.d.luau", "luau-api", "Polytoria Luau API definitions", "Complete Luau type definitions for Polytoria scripting: globals, enums and every class with its properties, methods and events.", "text/x-luau"),
 		("polytoria://context", "context", "Creator context", "Live project, world, selection, camera and playtest state.", "application/json"),
@@ -300,6 +301,7 @@ internal sealed class GarkMcpProtocol(IGarkMcpHost host)
 		{
 			case "polytoria://guide/workflow": text = GarkGuidance.Workflow; break;
 			case "polytoria://guide/coordinates": text = GarkGuidance.Coordinates; break;
+			case "polytoria://guide/building": text = GarkGuidance.Building; break;
 			case "polytoria://guide/ui": text = GarkGuidance.UI; break;
 			case "polytoria://api/polytoria.d.luau":
 				text = GarkTools.LuauDefinitions;

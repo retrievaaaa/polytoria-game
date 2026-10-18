@@ -152,4 +152,73 @@ internal sealed partial class GarkTools
 		var moves = items.Select(item => { var delta = Vector3.Zero; delta[axis] = coordinate - Edge(Bounds(item)); return (item, delta); }).ToArray();
 		return MoveTogether(moves, "Gark: align objects");
 	}
+	/// <summary>Bounds of what is drawn (parts, meshes, text, images); light volumes and helpers do not count.</summary>
+	private Aabb GeometryBounds(IEnumerable<Dynamic> roots)
+	{
+		var boxes = roots.SelectMany(r => r.GetDescendants().OfType<Dynamic>().Prepend(r)).Distinct()
+			.Select(d => d switch { Part or Datamodel.Mesh => d.GetSelfBound(), Text3D or Image3D => d.GetBounds(), _ => default })
+			.Where(b => b.Size != Vector3.Zero && b.Size.IsFinite()).ToArray();
+		return boxes.Length > 0 ? boxes.Aggregate((x, y) => x.Merge(y)) : roots.Select(Bounds).Aggregate((x, y) => x.Merge(y));
+	}
+	private JsonObject ScaleInstances(JsonObject a)
+	{
+		var targets = Targets(a);
+		float factor = Float(a, "factor") ?? throw new ArgumentException("Missing factor");
+		if (!float.IsFinite(factor) || factor <= 0) throw new ArgumentException("factor must be a positive number.");
+		static bool Outermost(Instance item, Instance root)
+		{
+			for (var parent = item.Parent; parent != null && parent != root; parent = parent.Parent) if (parent is Dynamic) return false;
+			return true;
+		}
+		// Scale each outermost spatial object once; children follow their parent's Size.
+		var units = new List<Dynamic>();
+		foreach (var item in targets.Where(t => !targets.Any(other => other != t && t.IsDescendantOf(other))))
+		{
+			if (item is Dynamic dynamic) units.Add(dynamic);
+			else units.AddRange(item.GetDescendants().OfType<Dynamic>().Where(d => Visible(d) && Outermost(d, item)));
+		}
+		if (units.Count == 0) throw new ArgumentException("Nothing spatial to scale.");
+		Aabb before = GeometryBounds(units);
+		Vector3 center = before.GetCenter();
+		Vector3 pivot = a["pivot"] switch
+		{
+			null => center,
+			JsonArray or JsonObject => GarkValues.Vector3Value(a["pivot"]!),
+			_ => Text(a, "pivot") switch
+			{
+				"center" => center,
+				"bottom" => new Vector3(center.X, before.Position.Y, center.Z),
+				_ => throw new ArgumentException("pivot must be center, bottom or [x,y,z].")
+			}
+		};
+		using var edit = new SceneEdit(this);
+		foreach (var unit in units)
+		{
+			Vector3 position = unit.Position, size = unit.Size;
+			Vector3 newPosition = pivot + (position - pivot) * factor, newSize = size * factor;
+			edit.Change(() => unit.Size = newSize, () => unit.Size = size);
+			edit.Change(() => unit.Position = newPosition, () => unit.Position = position);
+		}
+		int lights = 0, texts = 0;
+		foreach (var item in units.SelectMany(u => u.GetDescendants().Prepend(u)).Distinct())
+		{
+			switch (item)
+			{
+				case PointLight point: { float range = point.Range; edit.Change(() => point.Range = range * factor, () => point.Range = range); lights++; break; }
+				case SpotLight spot: { float range = spot.Range; edit.Change(() => spot.Range = range * factor, () => spot.Range = range); lights++; break; }
+				case Text3D text:
+				{
+					float font = text.FontSize; int outline = text.OutlineWidth;
+					edit.Change(() => text.FontSize = font * factor, () => text.FontSize = font);
+					if (outline > 0) edit.Change(() => text.OutlineWidth = Math.Max(1, (int)Math.Round(outline * factor)), () => text.OutlineWidth = outline);
+					texts++;
+					break;
+				}
+			}
+		}
+		edit.Finish("Gark: scale " + (units.Count == 1 ? units[0].Name : units.Count + " objects") + " ×" + factor.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture));
+		Aabb after = GeometryBounds(units);
+		return new() { ["scaled"] = SummaryArray(units.Take(100)), ["scaled_count"] = units.Count, ["factor"] = factor, ["pivot"] = GarkValues.Encode(pivot),
+			["bounds_before"] = BoundsJson(before), ["bounds_after"] = BoundsJson(after), ["lights_adjusted"] = lights, ["texts_adjusted"] = texts };
+	}
 }

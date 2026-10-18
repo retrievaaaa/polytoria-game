@@ -92,6 +92,7 @@ public partial class GarkIntegrationTests : Node
 			Check(listing.Data["items"]!.AsArray().Count == 1 && listing.Data["items"]![0]!["properties"]!["Size"]![0]!.GetValue<float>() == 4, "scene search with selected properties");
 			await HierarchyChecks(tools, world, part);
 			await ConstructionChecks(tools, world);
+			await FeedbackChecks(tools, world);
 			await SpatialChecks(tools, world);
 			await AssetChecks(world);
 			if (Globals.ReadCmdArgs().ContainsKey("garkassetlive")) await LiveAssetChecks(tools, world);

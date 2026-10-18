@@ -32,20 +32,20 @@ The server binds 127.0.0.1 and ::1 only. It refuses browser requests from other 
 
 ## What agents get
 
-- **Server instructions** sent on `initialize`: the recommended workflow and Polytoria's verified coordinate and UI conventions. Clients that ignore instructions can read the same text with `get_creator_guide` or the `polytoria://guide/*` resources.
-- **Tools** (46), each with a JSON schema and MCP annotations (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`) so clients can auto-approve reads.
-- **Resources**: `polytoria://guide/workflow|coordinates|ui`, `polytoria://api/polytoria.d.luau` (the complete generated Luau type definitions used by the script editor), `polytoria://context` (live state), and every project script as `polytoria://scripts/{path}`, including unsaved editor changes.
+- **Server instructions** sent on `initialize`: the recommended workflow and Polytoria's verified conventions (coordinates and viewer-relative handedness, player scale, Text3D orientation, collision layers, datastore limits, replication, UI layout). Clients that ignore instructions can read the same text with `get_creator_guide` or the `polytoria://guide/*` resources. The test suite checks the measurable facts (player collider, Text3D orientation and line height, axes) against the engine.
+- **Tools** (47), each with a JSON schema and MCP annotations (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`) so clients can auto-approve reads.
+- **Resources**: `polytoria://guide/workflow|coordinates|building|ui`, `polytoria://api/polytoria.d.luau` (the complete generated Luau type definitions used by the script editor), `polytoria://context` (live state), and every project script as `polytoria://scripts/{path}`, including unsaved editor changes.
 - **Prompts**: `gark` (build something end to end), `explain_project`, `fix_errors`.
 
 | Area | Tools |
 | --- | --- |
-| Context and discovery | `get_context` (project folder, worlds, selection, camera, undo/redo, playtest), `get_creator_guide`, `list_instances` (search, class filter, chosen property values), `inspect_instance` (one or many, by ID or `/path`), `class_schema` (property types and JSON formats, enums, allowed asset classes, Luau API), `search_api` |
-| World editing | `create_instances` (whole hierarchies in one call with `"@N"` parents), `set_properties` (one object, many objects, or per-object edits in one undo step), `delete_instances`, `duplicate_instances`, `reparent_instances`, `group_instances`, `ungroup_instances`, `select_instances` |
+| Context and discovery | `get_context` (project folder, worlds, selection, camera, undo/redo, playtest), `get_creator_guide`, `list_instances` (search, class filter, chosen property values), `inspect_instance` (one or many, by ID or `/path`), `class_schema` (property types and JSON formats, enums, allowed asset classes, Luau API, which properties replicate, engine notes such as collision bitmasks), `search_api` |
+| World editing | `create_instances` (whole hierarchies in one call with `"@N"` parents; reports sibling auto-renames), `set_properties` (one object, many objects, or per-object edits in one undo step), `delete_instances`, `duplicate_instances`, `reparent_instances`, `group_instances`, `ungroup_instances`, `select_instances` |
 | Procedural construction | `run_scene_code`: Luau loops, functions and math, applied as one undoable batch |
-| Spatial inspection and placement | `get_bounds`, `measure_distance`, `raycast`, `overlap_box`, `place_on_ground`, `align_instances` |
+| Spatial inspection and placement | `get_bounds`, `measure_distance`, `raycast`, `overlap_box`, `place_on_ground`, `align_instances`, `scale_instances` |
 | Visual inspection | `capture_viewport` (frame objects with `focus_ids`, view presets, several views in one call, PNG or JPEG up to 3840×2160), `focus_camera` (show the user a result) |
 | Scripts | `list_scripts`, `read_script`, `grep_scripts`, `patch_script` (several exact edits per call, CRLF-aware), `write_script`, `create_script`, `delete_script`, `script_diagnostics`, `open_script` |
-| Playtesting and debugging | `start_playtest`, `stop_playtest`, `inspect_playtest`, `playtest_input`, `playtest_eval` (run Luau on the live server or client and get JSON results), `capture_playtest`, `playtest_logs` |
+| Playtesting and debugging | `start_playtest` (1-8 players, optional fake clock), `stop_playtest`, `inspect_playtest`, `playtest_input`, `playtest_eval` (run Luau on the live server or client and get JSON results), `capture_playtest`, `playtest_logs` |
 | Toolbox assets | `search_assets`, `inspect_asset` (metadata and thumbnail), `import_asset` (model, mesh, image, audio; an ID from the user can be imported directly) |
 | History, saving and worlds | `undo`, `redo` (with step counts, reporting what changed), `save_world` (current or all open worlds), `switch_world` |
 
@@ -73,21 +73,26 @@ end
 return stairs
 ```
 
-`scene.create`, `scene.set`, `scene.reparent` and `scene.delete` stage edits. Creation returns temporary handles, and the tool result maps them to real instance IDs. `scene.get`, `scene.children`, `scene.descendants`, `scene.find`, `scene.selection`, `scene.bounds`, `scene.raycast` and `scene.overlap` inspect the scene as it was before the batch, so query newly created geometry in the next call. Normal Luau computation libraries, `print` and plain-table return values are supported. Gameplay globals, IO and networking are absent. The VM yields regularly to keep Creator responsive, with no total execution limit. An error, a world switch or a cancellation rolls back the current batch, and completed batches remain undoable.
+`scene.create`, `scene.set`, `scene.reparent` and `scene.delete` stage edits that are applied together at the end. Creation returns temporary handles. Handles in the returned value come back as real instance IDs, `created_roots` lists the top-level objects made, and `return_ids` adds the full map. `scene.get`, `scene.children`, `scene.descendants` (both can include chosen property values), `scene.find`, `scene.selection`, `scene.bounds`, `scene.raycast` and `scene.overlap` inspect the scene as it was before the batch. With `apply_as_you_go`, every edit lands immediately instead, so later queries in the same program see it. It is still one undo step that rolls back on error. Polytoria keeps sibling names unique, so a clashing `Name` gets a number appended, and `renamed` lists each one. Normal Luau computation libraries, `print` and plain-table return values are supported. Gameplay globals, IO and networking are absent. The VM yields regularly to keep Creator responsive, with no total execution limit. An error, a world switch or a cancellation rolls back the current batch, and completed batches remain undoable.
 
 ### Spatial tools
 
-Bounds are world-space axis-aligned boxes, including rotation and scale. Box overlap and bounds-gap measurements are conservative. Raycasts use the existing collision shapes. Ground placement casts down from each object's bounding-box top center, then places its bottom at the hit height plus optional clearance. Alignment supports minimum, center and maximum bounds along each axis. Placement operations are single undo actions.
+Bounds are world-space axis-aligned boxes, including rotation and scale. Box overlap and bounds-gap measurements are conservative. Raycasts use the existing collision shapes. Ground placement casts down from each object's bounding-box top center, then places its bottom at the hit height plus optional clearance. Alignment supports minimum, center and maximum bounds along each axis. `scale_instances` scales objects about their center, bottom or a point. It also scales light ranges and Text3D font sizes, which do not follow `Size`. Placement operations are single undo actions.
+
+Camera framing (`capture_viewport` and `focus_camera` without explicit targets, or with Models and Folders as targets) skips hidden and fully transparent parts and far-out or giant parts such as invisible boundary walls, and reports how many it skipped. Objects named directly are always framed. For Models, `inspect_instance` labels `Position`/`Size` as the pivot and scale factor and adds the real bounds. Large listings are cut at about 48 KB with `next_offset`.
 
 ### Playtests
 
-Playtests pack a temporary snapshot in the normal project format, including open worlds and unsaved scripts. Gark owns a separate local server and one rendered client, controlled through authenticated loopback IPC that exists only in the Creator build. Tests never save the editing world or copy gameplay changes back. Restart the test after editing to pick up a new snapshot.
+Playtests pack a temporary snapshot in the normal project format, including open worlds and unsaved scripts. Gark owns a separate local server and 1-8 rendered clients (each its own player), controlled through authenticated loopback IPC that exists only in the Creator build. Tests never save the editing world or copy gameplay changes back. Restart the test after editing to pick up a new snapshot.
 
-- `inspect_playtest` returns the player, the camera and runtime objects, including UI rectangles and button text.
-- `playtest_input` sends keys, movement actions, mouse clicks and drags, and text to the client.
-- `playtest_eval` runs a Luau chunk as a normal game script on the server or client. A bare expression is returned REPL-style. It returns the chunk's values as JSON, plus its output and errors.
-- `capture_playtest` returns the real game viewport with screen UI.
-- `playtest_logs` returns structured runtime messages and labeled engine output, filterable by severity and source, and available after the test stops.
+- `start_playtest` returns each player's spawn state, including the character's collision size. `clock` starts `os.time`, `os.date` and `tick` at a chosen date on the server and every client, for testing daily rewards or events.
+- `inspect_playtest` returns the player, the camera and runtime objects, including UI rectangles and button text. Narrow it with `parent`, `depth` and `query`; pages are cut at about 40 KB.
+- `playtest_input` sends keys, movement actions, mouse clicks and drags, and text to a client, and returns the resulting player and camera state.
+- `playtest_eval` runs a Luau chunk as a normal game script on the server or a client. A bare expression is returned REPL-style. It returns the chunk's values as JSON, plus its output and errors.
+- `capture_playtest` returns the real game viewport with screen UI, from the player's camera or from a temporary camera placed with `position`/`look_at`.
+- `playtest_logs` returns script messages (with stack traces) and engine output, with multi-line traces grouped into one entry. It filters by kind, severity, source (server, any client or one client) and text, reports counts, and pages by size. Logs stay available after the test stops.
+
+Local playtests use the live datastore rules. Only numbers, strings, booleans and nil can be stored, and reads and writes each share a per-minute quota of 30 + 10 × players. Previously local tests accepted anything, and the same scripts then failed online.
 
 ### Toolbox
 
@@ -115,7 +120,7 @@ This uses a disposable project under `target/gark-qa`. It covers:
 
 Add:
 
-- `--garkplaytest` for a real disposable server and client: UI clicks, movement, camera drags, `playtest_eval` on server and client, screenshots, runtime errors, cancellation and process cleanup.
+- `--garkplaytest` for a real disposable server and clients: UI clicks, movement, camera drags, `playtest_eval` on server and client, screenshots and aimed captures, runtime errors and log filters, two players, the fake clock, cancellation and process cleanup.
 - `--garkassetlive` to search and import a real public Toolbox model.
 - `--garkinterop --gark-mcp-serve <port>` to leave Creator running on a disposable project, so real agents can be pointed at it.
 

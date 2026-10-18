@@ -101,13 +101,13 @@ internal sealed partial class GarkTools(CreatorSession? session, World? world)
 		Add("get_context", "Get Creator context", GarkToolFlags.Read,
 			"Active project (name, absolute folder), current world, open and project worlds, selection, editor camera, undo/redo state and playtest status. Call first, and again if the user may have switched worlds.");
 		Add("get_creator_guide", "Read Polytoria guide", GarkToolFlags.Read,
-			"Verified Polytoria conventions: Y-up coordinates, +Z object forward vs -Z camera forward, degrees, world vs local transforms, primitive axes, and the UI layout model. Same text as the server instructions.",
-			"""{"topic":{"type":"string","enum":["workflow","coordinates","ui","all"]}}""");
+			"Verified Polytoria conventions: Y-up coordinates, +Z object forward vs -Z camera forward, viewer-relative handedness, degrees, world vs local transforms, primitive axes, player scale, Text3D orientation, collision layers, datastore limits, replication and the UI layout model. Same text as the server instructions.",
+			"""{"topic":{"type":"string","enum":["workflow","coordinates","building","ui","all"]}}""");
 		Add("list_instances", "List instances", GarkToolFlags.Read,
-			"Browse or search the scene tree under a parent. Filters: query (name/class substring), class_name (includes subclasses). include_properties adds chosen property values (or [\"*\"] for all) to each row. Paginated; returns total.",
+			"Browse or search the scene tree under a parent. Filters: query (name/class substring), class_name (includes subclasses). include_properties adds chosen property values (or [\"*\"] for all) to each row. Paginated (pages are also cut at about 48 KB); returns total and next_offset.",
 			"""{"parent":{"type":"string","description":"ID or /path. Default: world root."},"depth":{"type":"integer","description":"Levels below parent. Default 2."},"query":{"type":"string"},"class_name":{"type":"string"},"include_properties":{"type":"array","items":{"type":"string"}},"offset":{"type":"integer"},"limit":{"type":"integer","description":"Default 100, max 5000."}}""");
 		Add("inspect_instance", "Inspect instances", GarkToolFlags.Read,
-			"Read every editable property (including references, assets, ranges and series), children, bounds and linked script path of one instance (id) or many (ids).",
+			"Read every editable property (including references, assets, ranges and series), children, world bounds of the contents and linked script path of one instance (id) or many (ids). For Models, Position/Size are the pivot and scale factor; bounds is the actual extent.",
 			"""{"id":{"type":"string"},"ids":""" + IdArray + ""","child_limit":{"type":"integer","description":"Children listed per instance. Default 100."}}""");
 		Add("class_schema", "Class schema", GarkToolFlags.Read,
 			"Without class_name: every creatable class. With class_name: base classes, each editable property's type, JSON format, enum values and allowed asset classes, plus the Luau scripting API (properties, methods, events). Works for instance, asset and data classes.",
@@ -118,7 +118,7 @@ internal sealed partial class GarkTools(CreatorSession? session, World? world)
 
 		// World editing
 		Add("create_instances", "Create instances", GarkToolFlags.Edit,
-			"Create objects as one undo action. Each object: class_name, parent (ID, /path or \"@N\" = the Nth object created earlier in this call, so whole hierarchies fit in one call), optional name and properties. Default parent: /PlayerGUI for GUI, else /Environment. Use create_script for scripts.",
+			"Create objects as one undo action. Each object: class_name, parent (ID, /path or \"@N\" = the Nth object created earlier in this call, so whole hierarchies fit in one call), optional name and properties. Default parent: /PlayerGUI for GUI, else /Environment. Use create_script for scripts. Sibling names are unique in Polytoria: a clashing name gets a number appended, reported in renamed.",
 			"""{"objects":{"type":"array","items":{"type":"object","properties":{"class_name":{"type":"string"},"parent":{"type":"string"},"name":{"type":"string"},"properties":{"type":"object"}},"required":["class_name"]}}}""", "objects");
 		Add("set_properties", "Set properties", GarkToolFlags.Edit | GarkToolFlags.Idempotent,
 			"Edit properties as one undo action. Use {id, properties}, {ids, properties} to apply the same values to many objects, or {edits:[{id, properties}, ...]} for different values. Values: vectors [x,y,z], colors \"#RRGGBB\", enums as names, references as IDs, assets as {class_name, properties}; class_schema lists formats.",
@@ -259,6 +259,7 @@ internal sealed partial class GarkTools(CreatorSession? session, World? world)
 				await PhysicsReady(token);
 				return new(new JsonObject { ["moved"] = PlaceOnGround(args, token) });
 			case "align_instances": return new(new JsonObject { ["moved"] = AlignInstances(args) });
+			case "scale_instances": return new(ScaleInstances(args));
 			case "search_assets": return new(await SearchAssets(args, token));
 			case "inspect_asset": return await InspectAsset(args, token);
 			case "import_asset": return new(await ImportAsset(args, token));
@@ -424,6 +425,7 @@ internal sealed partial class GarkTools(CreatorSession? session, World? world)
 			.Take(1000).OrderBy(p => p, StringComparer.OrdinalIgnoreCase);
 	}
 
+	private const int MaxListingChars = 48_000;
 	private JsonObject ListInstances(JsonObject a)
 	{
 		int depth = Int(a, "depth", 2, 1, 1000), limit = Int(a, "limit", 100, 1, 5000), offset = Int(a, "offset", 0, 0, int.MaxValue);
@@ -431,7 +433,8 @@ internal sealed partial class GarkTools(CreatorSession? session, World? world)
 		Type? classFilter = a["class_name"] != null ? InstanceType(Text(a, "class_name")) : null;
 		string[] include = Strings(a, "include_properties");
 		var page = new JsonArray();
-		int total = 0;
+		int total = 0, size = 0;
+		bool full = false;
 		void Visit(Instance parent, int level)
 		{
 			foreach (var child in parent.GetChildren())
@@ -441,12 +444,14 @@ internal sealed partial class GarkTools(CreatorSession? session, World? world)
 					&& (classFilter == null || classFilter.IsInstanceOfType(child));
 				if (match)
 				{
-					if (total >= offset && page.Count < limit)
+					if (total >= offset && page.Count < limit && !full)
 					{
 						var entry = Summary(child);
 						entry["depth"] = level;
 						if (include.Length > 0) entry["properties"] = Properties(child, include);
-						page.Add((JsonNode)entry);
+						int cost = entry.ToJsonString().Length;
+						if (page.Count > 0 && size + cost > MaxListingChars) full = true;
+						else { page.Add((JsonNode)entry); size += cost; }
 					}
 					total++;
 				}
@@ -454,7 +459,13 @@ internal sealed partial class GarkTools(CreatorSession? session, World? world)
 			}
 		}
 		Visit(Resolve(Text(a, "parent", "/")), 1);
-		return new JsonObject { ["items"] = page, ["total"] = total, ["has_more"] = offset + page.Count < total };
+		var result = new JsonObject { ["items"] = page, ["total"] = total, ["has_more"] = offset + page.Count < total };
+		if (offset + page.Count < total)
+		{
+			result["next_offset"] = offset + page.Count;
+			result["hint"] = (full ? "Page cut at about 48 KB. " : "") + "Continue with offset, or narrow with parent, depth, query, class_name or fewer include_properties.";
+		}
+		return result;
 	}
 
 	private static JsonObject Properties(Instance i, string[]? only = null)
@@ -477,7 +488,8 @@ internal sealed partial class GarkTools(CreatorSession? session, World? world)
 		var children = item.GetChildren().Where(Visible).ToArray();
 		result["children"] = new JsonArray(children.Take(childLimit).Select(c => (JsonNode)new JsonObject { ["id"] = c.ObjectID, ["name"] = c.Name, ["class_name"] = c.ClassName }).ToArray());
 		if (children.Length > childLimit) result["children_truncated"] = children.Length - childLimit;
-		if (item is Dynamic && TryBounds(item) is { } bounds) result["bounds"] = BoundsJson(bounds);
+		if ((item is Dynamic || item.GetDescendants().OfType<Dynamic>().Any()) && TryBounds(item) is { } bounds) result["bounds"] = BoundsJson(bounds);
+		if (item is Model) result["transform_note"] = "A Model's Position/Rotation are its pivot and Size is its scale factor (default [1,1,1]; changing it scales every child about the pivot), not the extent of its contents. Use bounds for where the contents are and how big they are.";
 		if (item is Datamodel.Script { LinkedScript.LinkedPath: { } script }) result["script_path"] = script;
 		return result;
 	}
@@ -501,26 +513,132 @@ internal sealed partial class GarkTools(CreatorSession? session, World? world)
 		for (var b = type.BaseType; b != null && b != typeof(object) && b != typeof(ValueType) && b.Namespace?.StartsWith("Polytoria") == true; b = b.BaseType)
 			bases.Add((JsonNode?)JsonValue.Create(b.Name));
 		var properties = new JsonObject();
-		foreach (var property in GarkValues.Editable(type)) properties[property.Name] = GarkValues.Describe(property);
+		var settable = new List<PropertyInfo>();
+		foreach (var property in GarkValues.Editable(type)) { properties[property.Name] = GarkValues.Describe(property); settable.Add(property); }
 		var scriptProperties = new JsonObject();
 		var events = new JsonArray();
 		foreach (var property in type.GetProperties(BindingFlags.Public | BindingFlags.Instance | BindingFlags.Static).Where(p => p.IsDefined(typeof(ScriptPropertyAttribute), true)).OrderBy(p => p.Name))
 		{
 			if (property.PropertyType.Name.StartsWith("PTSignal")) events.Add((JsonNode?)JsonValue.Create(property.Name + SignalArguments(property.PropertyType)));
 			else if (!properties.ContainsKey(property.Name))
+			{
 				scriptProperties[property.Name] = TypeName(property.PropertyType) + (property.SetMethod?.IsPublic == true ? "" : " (read-only)");
+				if (!(property.GetMethod ?? property.SetMethod)!.IsStatic) settable.Add(property);
+			}
 		}
 		var methods = type.GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.Static)
 			.Select(m => (Method: m, Attribute: m.GetCustomAttribute<ScriptMethodAttribute>()))
 			.Where(m => m.Attribute != null)
 			.Select(m => $"{(m.Method.IsStatic ? "static " : "")}{m.Attribute!.MethodName ?? m.Method.Name}({string.Join(", ", m.Method.GetParameters().Where(p => !p.IsDefined(typeof(ScriptingCallerAttribute))).Select(p => TypeName(p.ParameterType) + " " + p.Name))}) -> {TypeName(m.Method.ReturnType)}")
 			.Distinct().OrderBy(s => s, StringComparer.Ordinal).Select(s => (JsonNode?)JsonValue.Create(s)).ToArray();
-		return new JsonObject
+		var result = new JsonObject
 		{
 			["class_name"] = type.Name, ["base_classes"] = bases, ["creatable"] = Classes.Contains(type),
 			["editable_properties"] = properties,
-			["script_properties"] = scriptProperties, ["script_methods"] = new JsonArray(methods), ["script_events"] = events
+			["script_properties"] = scriptProperties, ["script_methods"] = new JsonArray(methods), ["script_events"] = events,
+			["replication"] = Replication(type, settable)
 		};
+		var notes = ClassNotes(type);
+		if (notes.Count > 0) result["notes"] = notes;
+		return result;
+	}
+	/// <summary>Engine behavior that property types alone do not reveal.</summary>
+	private static JsonArray ClassNotes(Type type)
+	{
+		var notes = new List<string>();
+		if (typeof(Physical).IsAssignableFrom(type))
+			notes.Add(GarkGuidance.CollisionNote);
+		if (type == typeof(Model))
+			notes.Add("Position/Rotation are the Model's pivot and Size is its scale factor (default [1,1,1]; changing Size scales every child about the pivot). They do not describe where the contents are or how big they are: use get_bounds or inspect_instance bounds. scale_instances scales about a chosen pivot.");
+		if (type == typeof(Text3D))
+			notes.Add(GarkGuidance.Text3DNote);
+		if (type == typeof(Datamodel.Data.Datastore) || type == typeof(Datamodel.Services.DatastoreService))
+			notes.Add(GarkGuidance.DatastoreNote);
+		if (typeof(NPC).IsAssignableFrom(type))
+			notes.Add(GarkGuidance.PlayerScaleNote);
+		return new(notes.Select(n => (JsonNode?)JsonValue.Create(n)).ToArray());
+	}
+	/// <summary>
+	/// Which settable properties a server change sends to clients. Membership comes from the generated sync registry;
+	/// "initial_only" marks synced properties whose setter never broadcasts (found by scanning the setter's IL), so
+	/// clients get the value when the object first replicates but not later script changes.
+	/// </summary>
+	private static JsonObject? Replication(Type type, IEnumerable<PropertyInfo> properties)
+	{
+		if (!typeof(NetworkedObject).IsAssignableFrom(type)) return null;
+		var replicated = new SortedSet<string>(StringComparer.Ordinal);
+		var initialOnly = new SortedSet<string>(StringComparer.Ordinal);
+		var local = new SortedSet<string>(StringComparer.Ordinal);
+		foreach (var property in properties)
+		{
+			if (property.SetMethod is not { IsPublic: true } setter || property.GetIndexParameters().Length > 0) continue;
+			var sync = Polytoria.Networking.Synchronizers.PropSyncRegistry.GetProp(type, property.Name);
+			// Transforms are [NoSync] but travel through the separate network transform sync.
+			if (sync == null) (Calls(setter, IsTransformSync, 0) ? replicated : local).Add(property.Name);
+			else if (!Calls(setter, IsPropertySync, 0)) initialOnly.Add(property.Name);
+			else replicated.Add(property.Name);
+		}
+		static JsonArray List(IEnumerable<string> names) => new(names.Select(n => (JsonNode?)JsonValue.Create(n)).ToArray());
+		var result = new JsonObject
+		{
+			["rule"] = "Change replicated properties from a server script and every client sees it; a client script's change stays on that client. "
+				+ "not_replicated properties never cross the network: set them where they are needed (e.g. in a ClientScript) or send values with a NetworkEvent. "
+				+ "initial_only properties reach clients only when the object first replicates (world load or creation); later server changes are not sent.",
+			["replicated"] = List(replicated)
+		};
+		if (initialOnly.Count > 0) result["initial_only"] = List(initialOnly);
+		if (local.Count > 0) result["not_replicated"] = List(local);
+		return result;
+	}
+	private static readonly Dictionary<short, System.Reflection.Emit.OpCode> OpCodesByValue = typeof(System.Reflection.Emit.OpCodes)
+		.GetFields(BindingFlags.Public | BindingFlags.Static).Select(f => (System.Reflection.Emit.OpCode)f.GetValue(null)!).ToDictionary(o => o.Value);
+	private static bool IsPropertySync(MethodBase m) => m.DeclaringType == typeof(NetworkedObject) && m.Name is "OnPropertyChanged" or "SyncPropToClients";
+	private static bool IsTransformSync(MethodBase m) => m.DeclaringType == typeof(Dynamic) && m.Name.StartsWith("UpdateNetTransform", StringComparison.Ordinal);
+	private static readonly System.Collections.Concurrent.ConcurrentDictionary<(MethodBase, Func<MethodBase, bool>), bool> CallCache = new();
+	private static bool Calls(MethodBase method, Func<MethodBase, bool> target, int depth)
+	{
+		if (depth == 0 && CallCache.TryGetValue((method, target), out bool known)) return known;
+		bool result = false;
+		foreach (var callee in Callees(method))
+		{
+			if (target(callee)) { result = true; break; }
+			// Follow helpers and forwarding setters in engine code a couple of levels deep.
+			if (depth < 2 && callee.DeclaringType?.Assembly == typeof(NetworkedObject).Assembly && Calls(callee, target, depth + 1)) { result = true; break; }
+		}
+		if (depth == 0) CallCache[(method, target)] = result;
+		return result;
+	}
+	private static List<MethodBase> Callees(MethodBase method)
+	{
+		var found = new List<MethodBase>();
+		byte[]? il;
+		try { il = method.GetMethodBody()?.GetILAsByteArray(); }
+		catch (Exception ex) when (ex is InvalidOperationException or NotSupportedException) { return found; }
+		if (il == null) return found;
+		Type[]? typeArguments = method.DeclaringType is { IsGenericType: true } owner ? owner.GetGenericArguments() : null;
+		Type[]? methodArguments = method.IsGenericMethod ? method.GetGenericArguments() : null;
+		for (int i = 0; i < il.Length;)
+		{
+			short value = il[i] == 0xFE && i + 1 < il.Length ? unchecked((short)(0xFE00 | il[i + 1])) : il[i];
+			i += il[i] == 0xFE ? 2 : 1;
+			if (!OpCodesByValue.TryGetValue(value, out var op)) break;
+			int size = op.OperandType switch
+			{
+				System.Reflection.Emit.OperandType.InlineNone => 0,
+				System.Reflection.Emit.OperandType.ShortInlineBrTarget or System.Reflection.Emit.OperandType.ShortInlineI or System.Reflection.Emit.OperandType.ShortInlineVar => 1,
+				System.Reflection.Emit.OperandType.InlineVar => 2,
+				System.Reflection.Emit.OperandType.InlineI8 or System.Reflection.Emit.OperandType.InlineR => 8,
+				System.Reflection.Emit.OperandType.InlineSwitch => i + 4 <= il.Length ? 4 + 4 * BitConverter.ToInt32(il, i) : 4,
+				_ => 4
+			};
+			if (op.OperandType == System.Reflection.Emit.OperandType.InlineMethod && i + 4 <= il.Length)
+			{
+				try { if (method.Module.ResolveMethod(BitConverter.ToInt32(il, i), typeArguments, methodArguments) is { } callee) found.Add(callee); }
+				catch (Exception ex) when (ex is ArgumentException or MissingMethodException or BadImageFormatException) { }
+			}
+			i += size;
+		}
+		return found;
 	}
 	private static string SignalArguments(Type signal) => signal.IsGenericType ? "(" + string.Join(", ", signal.GetGenericArguments().Select(TypeName)) + ")" : "()";
 	private static string TypeName(Type type)
@@ -541,6 +659,7 @@ internal sealed partial class GarkTools(CreatorSession? session, World? world)
 		var objects = a["objects"] as JsonArray ?? throw new ArgumentException("objects must be an array.");
 		if (objects.Count is < 1 or > 10000) throw new ArgumentException("Create 1 to 10,000 objects per call; use run_scene_code for larger procedural builds.");
 		var created = new List<(Instance Item, Instance Parent)>();
+		var renamed = new Renames();
 		try
 		{
 			for (int index = 0; index < objects.Count; index++)
@@ -560,13 +679,21 @@ internal sealed partial class GarkTools(CreatorSession? session, World? world)
 				item.Parent = parent;
 				item.Name = Text(spec, "name", className);
 				item.CreatorInserted();
-				try { foreach (var change in ConvertProperties(item, spec["properties"] is JsonObject p ? p : new())) change.Property.SetValue(item, change.Value); }
+				try
+				{
+					var changes = ConvertProperties(item, spec["properties"] is JsonObject p ? p : new());
+					foreach (var change in changes) change.Property.SetValue(item, change.Value);
+					if (changes.Any(c => c.Property.Name == "Name")) renamed.Check(item, changes);
+					else renamed.Check(item, spec["name"] != null ? Text(spec, "name") : null);
+				}
 				catch (Exception ex) when (ex is not OperationCanceledException) { throw new ArgumentException($"objects[{index}] ({className}): {ex.GetBaseException().Message}", ex); }
 			}
 			Commit("Gark: create " + (created.Count == 1 ? created[0].Item.Name : created.Count + " objects"),
 				() => { foreach (var (item, parent) in created) item.Parent = parent; },
 				() => { foreach (var (item, _) in created.AsEnumerable().Reverse()) { world!.CreatorContext.Selections.Deselect(item); item.Parent = world.TemporaryContainer; } });
-			return new JsonObject { ["created"] = SummaryArray(created.Select(x => x.Item)) };
+			var result = new JsonObject { ["created"] = SummaryArray(created.Select(x => x.Item)) };
+			renamed.AddTo(result);
+			return result;
 		}
 		catch { foreach (var item in created.AsEnumerable().Reverse()) if (!item.Item.IsDeleted) item.Item.Delete(); throw; }
 	}
@@ -600,7 +727,9 @@ internal sealed partial class GarkTools(CreatorSession? session, World? world)
 			try { foreach (var (item, list) in changes) foreach (var change in list) change.Property.SetValue(item, change.Value); }
 			catch { Revert(); throw; }
 		}, Revert);
-		return new JsonObject
+		var renamed = new Renames();
+		foreach (var (item, list) in changes) renamed.Check(item, list);
+		var result = new JsonObject
 		{
 			["updated"] = new JsonArray(changes.Select(c =>
 			{
@@ -609,6 +738,8 @@ internal sealed partial class GarkTools(CreatorSession? session, World? world)
 				return (JsonNode)summary;
 			}).ToArray())
 		};
+		renamed.AddTo(result);
+		return result;
 	}
 
 	private List<(PropertyInfo Property, object? Old, object? Value)> ConvertProperties(Instance instance, JsonObject values)
@@ -652,10 +783,15 @@ internal sealed partial class GarkTools(CreatorSession? session, World? world)
 		foreach (var child in items)
 			if (parent == child || parent.IsDescendantOf(child)) throw new InvalidOperationException($"Moving {child.Name} under {parent.Name} would create a cycle.");
 		var old = items.Select(i => i.Parent).ToArray();
+		var names = items.Select(i => i.Name).ToArray();
 		Commit("Gark: reparent " + (items.Length == 1 ? items[0].Name : items.Length + " objects"),
 			() => { foreach (var item in items) item.Parent = parent; },
 			() => { for (int i = items.Length - 1; i >= 0; i--) items[i].Parent = old[i]; });
-		return new JsonObject { ["moved"] = SummaryArray(items) };
+		var renamed = new Renames();
+		for (int i = 0; i < items.Length; i++) renamed.Check(items[i], names[i]);
+		var result = new JsonObject { ["moved"] = SummaryArray(items) };
+		renamed.AddTo(result);
+		return result;
 	}
 
 	private JsonObject Group(JsonObject a)
@@ -1036,17 +1172,63 @@ internal sealed partial class GarkTools(CreatorSession? session, World? world)
 		"bottom" => Vector3.Down,
 		_ => throw new ArgumentException("view must be current, iso, front, back, left, right, top or bottom.")
 	};
-	private Aabb? FocusBounds(string[] ids)
+	/// <summary>
+	/// What a camera should frame. Hidden or fully transparent parts and far-out giants inside containers (invisible
+	/// boundary walls, huge baseplates) are skipped so they cannot shrink the actual content to a dot; objects named
+	/// directly in ids always count.
+	/// </summary>
+	private (Aabb? Bounds, int Ignored) FocusBounds(string[] ids)
 	{
 		var items = ids.Length > 0 ? ids.Select(Resolve).ToArray() : [world!.Environment];
-		var boxes = items.Select(TryBounds).Where(b => b != null).Select(b => b!.Value).ToArray();
+		var pinned = new List<Aabb>();
+		var visible = new List<Aabb>();
+		var hidden = new List<Aabb>();
+		static bool Leaf(Dynamic d) => d is Part or Datamodel.Mesh or Text3D or Image3D;
+		static bool Invisible(Dynamic d) => d.IsHidden || d is Entity { Color.A: < 0.05f };
+		static Aabb Box(Dynamic d) => d is Part or Datamodel.Mesh ? d.GetSelfBound() : d.GetBounds();
+		foreach (var item in items)
+		{
+			if (item is Dynamic self && Leaf(self)) { pinned.Add(Box(self)); continue; }
+			foreach (var d in item.GetDescendants().OfType<Dynamic>())
+			{
+				if (!Leaf(d) || !Visible(d)) continue;
+				Aabb box = Box(d);
+				if (!box.Size.IsFinite() || box.Size == Vector3.Zero) continue;
+				(Invisible(d) ? hidden : visible).Add(box);
+			}
+		}
+		var source = visible.Count > 0 ? visible : hidden;
+		int ignored = source == visible ? hidden.Count : 0;
+		var kept = source;
+		if (source.Count >= 4)
+		{
+			static float Percentile(IEnumerable<float> values, float p) { var sorted = values.OrderBy(v => v).ToArray(); return sorted[(int)Math.Round(p * (sorted.Length - 1))]; }
+			Vector3 lo = default, hi = default;
+			for (int axis = 0; axis < 3; axis++)
+			{
+				lo[axis] = Percentile(source.Select(b => b.GetCenter()[axis]), 0.05f);
+				hi[axis] = Percentile(source.Select(b => b.GetCenter()[axis]), 0.95f);
+			}
+			float spread = (hi - lo)[(int)(hi - lo).MaxAxisIndex()];
+			float typical = Math.Max(Math.Max(spread, Percentile(source.Select(b => b.Size[(int)b.Size.MaxAxisIndex()]), 0.5f) * 4), 16);
+			float reach = typical * 4;
+			Vector3 middle = (lo + hi) / 2;
+			kept = source.Where(b => b.Size[(int)b.Size.MaxAxisIndex()] <= reach && ((b.GetCenter() - middle).Abs() is var offset) && offset[(int)offset.MaxAxisIndex()] <= reach).ToList();
+			if (kept.Count == 0) kept = source;
+			ignored += source.Count - kept.Count;
+		}
+		var boxes = pinned.Concat(kept).ToArray();
 		if (boxes.Length == 0)
 		{
+			var fallback = items.Select(TryBounds).Where(b => b != null).Select(b => b!.Value).ToArray();
+			if (fallback.Length > 0) return (fallback.Aggregate((x, y) => x.Merge(y)), 0);
 			if (ids.Length > 0) throw new ArgumentException("The focused objects have no spatial bounds.");
-			return null;
+			return (null, 0);
 		}
-		return boxes.Aggregate((x, y) => x.Merge(y));
+		return (boxes.Aggregate((x, y) => x.Merge(y)), ignored);
 	}
+	private static JsonObject? FramingNote(int ignored) => ignored == 0 ? null : new JsonObject { ["ignored_parts"] = ignored,
+		["note"] = "Framing skipped hidden/fully transparent parts and far-out or giant parts (such as invisible boundary walls). Name objects in ids/focus_ids to include them." };
 	private static (Vector3 Position, Vector3 Target) Frame(Aabb bounds, Vector3 direction, float fov, float aspect)
 	{
 		Vector3 center = bounds.GetCenter();
@@ -1076,7 +1258,7 @@ internal sealed partial class GarkTools(CreatorSession? session, World? world)
 		if (a["view"] != null) views.Insert(0, Text(a, "view"));
 		if (views.Count == 0) views.Add(focus.Length > 0 && a["position"] == null ? "iso" : "current");
 		if (views.Count > 12) throw new ArgumentException("Request at most 12 views per call.");
-		Aabb? bounds = views.Any(v => v != "current") || focus.Length > 0 ? FocusBounds(focus) : null;
+		var (bounds, ignored) = views.Any(v => v != "current") || focus.Length > 0 ? FocusBounds(focus) : (null, 0);
 
 		var shots = new List<Transform3D>();
 		foreach (string view in views)
@@ -1135,7 +1317,7 @@ internal sealed partial class GarkTools(CreatorSession? session, World? world)
 			return new(new JsonObject
 			{
 				["width"] = width, ["height"] = height, ["images"] = metadata,
-				["focus_bounds"] = bounds is { } box && focus.Length > 0 ? BoundsJson(box) : null,
+				["focus_bounds"] = bounds is { } box ? BoundsJson(box) : null, ["framing"] = FramingNote(ignored),
 				["note"] = "World render without screen UI or editor gizmos; images follow in order."
 			}, images);
 		}
@@ -1164,10 +1346,13 @@ internal sealed partial class GarkTools(CreatorSession? session, World? world)
 		var freelook = world!.CreatorContext.Freelook;
 		var camera = freelook.Camera3D;
 		Transform3D transform;
+		JsonObject? framing = null;
 		string[] ids = Strings(a, "ids");
 		if (ids.Length > 0)
 		{
-			var bounds = FocusBounds(ids)!.Value;
+			var (framed, ignored) = FocusBounds(ids);
+			var bounds = framed!.Value;
+			framing = FramingNote(ignored);
 			Vector3 direction = a["view"] != null ? ViewDirection(Text(a, "view")) : (camera.GlobalPosition - bounds.GetCenter()).Normalized();
 			if (!direction.IsFinite() || direction.IsZeroApprox()) direction = ViewDirection("iso");
 			var viewportSize = camera.GetViewport()?.GetVisibleRect().Size ?? new Vector2(16, 9);
@@ -1181,7 +1366,7 @@ internal sealed partial class GarkTools(CreatorSession? session, World? world)
 		}
 		else throw new ArgumentException("Supply ids, or position and/or look_at.");
 		freelook.GDNode3D.GlobalTransform = transform;
-		return new JsonObject { ["camera_position"] = GarkValues.Encode(transform.Origin), ["camera_forward"] = GarkValues.Encode(-transform.Basis.Z) };
+		return new JsonObject { ["camera_position"] = GarkValues.Encode(transform.Origin), ["camera_forward"] = GarkValues.Encode(-transform.Basis.Z), ["framing"] = framing };
 	}
 }
 

@@ -100,6 +100,9 @@ public sealed partial class LuauProvider : IScriptLanguageProvider
 
 	public static LuauProvider Singleton { get; private set; } = null!;
 
+	/// <summary>Seconds added to the wall clock scripts see (os.time, os.date, tick). Only set by Creator's local playtests.</summary>
+	internal static long ClockOffsetSeconds;
+
 	static LuauProvider()
 	{
 		foreach ((Type target, Type proxy) in ScriptService.ProxyMap)
@@ -131,6 +134,19 @@ public sealed partial class LuauProvider : IScriptLanguageProvider
 		state.SetField(-2, "wrap");
 
 		RegisterLuaExtensions(state);
+
+		if (ClockOffsetSeconds != 0)
+		{
+			// Calls without an explicit time read the shifted clock; explicit times keep their meaning.
+			byte[] clock = LuaState.Compile($$"""
+				local offset, time, date = {{ClockOffsetSeconds}}, os.time, os.date
+				os.time = function(t) if t == nil then return time() + offset end return time(t) end
+				os.date = function(format, t) return date(format, t or time() + offset) end
+				""");
+			if (NativeBindings.luau_load(state.State, "clock", clock, clock.Length, 0) != 0)
+				throw new InvalidOperationException("Could not load the clock override: " + state.ToString(-1));
+			state.Call(0, 0);
+		}
 
 		// Set all global library tables to read-only
 		state.PushNil();
@@ -1051,7 +1067,7 @@ public sealed partial class LuauProvider : IScriptLanguageProvider
 	public static int LuaTick(IntPtr L)
 	{
 		LuaState state = LuaState.FromIntPtr(L);
-		state.PushNumber((double)(DateTime.UtcNow - new DateTime(1970, 1, 1)).TotalSeconds);
+		state.PushNumber((double)(DateTime.UtcNow - new DateTime(1970, 1, 1)).TotalSeconds + ClockOffsetSeconds);
 		return 1;
 	}
 

@@ -16,10 +16,10 @@ namespace Polytoria.Providers.Datastore;
 
 public class PTDatastoreProvider : IDatastoreProvider
 {
-	private const int MaxReadRequestsPerMinute = 30;
-	private const int ReadRequestsPerPlayerModifier = 10;
-	private const int MaxWriteRequestsPerMinute = 30;
-	private const int WriteRequestsPerPlayerModifier = 10;
+	internal const int MaxReadRequestsPerMinute = 30;
+	internal const int ReadRequestsPerPlayerModifier = 10;
+	internal const int MaxWriteRequestsPerMinute = 30;
+	internal const int WriteRequestsPerPlayerModifier = 10;
 
 	private string _dsKey = "";
 	private readonly PTHttpClient _client = new();
@@ -161,7 +161,7 @@ public class PTDatastoreProvider : IDatastoreProvider
 		}
 	}
 
-	private static bool CheckSupportedType(object obj)
+	internal static bool CheckSupportedType(object obj)
 	{
 		if (obj == null) return false;
 		if (obj is int) return true;

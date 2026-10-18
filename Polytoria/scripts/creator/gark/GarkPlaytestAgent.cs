@@ -39,8 +39,10 @@ internal sealed partial class GarkPlaytestAgent : Node
 	private TcpClient? _connection;
 	private StreamWriter? _writer;
 	private LogDispatcher? _logger;
-	private bool _busy, _driving;
+	private bool _busy, _driving, _connected;
 	internal const string EvalMarker = "__GARK_EVAL__:";
+	private const int MaxPageChars = 40_000;
+	private bool IsClient => _role != "server";
 	private readonly object _evalLock = new();
 	private string? _evalId;
 	private TaskCompletionSource<string>? _evalResult;
@@ -49,8 +51,12 @@ internal sealed partial class GarkPlaytestAgent : Node
 	{
 		if (!args.TryGetValue("gark-test-port", out string? value) || !int.TryParse(value, out int port) || port is < 1 or > 65535) return;
 		if (!args.TryGetValue("gark-test-secret", out string? secret) || !Guid.TryParseExact(secret, "N", out _)) return;
-		if (!args.TryGetValue("gark-test-role", out string? role) || role is not ("server" or "client")) return;
+		if (!args.TryGetValue("gark-test-role", out string? role) || role != "server" && !GarkPlaytest.IsClientRole(role)) return;
 		if (!args.ContainsKey("solo") && !args.ContainsKey("ltchild")) return;
+		// Read before the world (and its Luau VM) exists; passed as target/reference Unix times.
+		if (args.TryGetValue("gark-test-clock", out string? clock) && clock.Split('/') is [var target, var reference]
+			&& long.TryParse(target, out long at) && long.TryParse(reference, out long now))
+			LuauProvider.ClockOffsetSeconds = at - now;
 		entry.AddChild(new GarkPlaytestAgent { _entry = entry, _port = port, _secret = secret, _role = role, ProcessPriority = -1000 });
 	}
 	public override void _Ready() => _ = Connect();
@@ -62,6 +68,7 @@ internal sealed partial class GarkPlaytestAgent : Node
 			var stream = _connection.GetStream();
 			_writer = new(stream, new UTF8Encoding(false)) { AutoFlush = true };
 			await Send(new() { ["secret"] = _secret, ["role"] = _role });
+			_connected = true;
 			using var reader = new StreamReader(stream, new UTF8Encoding(false));
 			while (await reader.ReadLineAsync(_lifetime.Token) is { } line) _commands.Enqueue(JsonNode.Parse(line)!.AsObject());
 		}
@@ -76,7 +83,8 @@ internal sealed partial class GarkPlaytestAgent : Node
 	}
 	public override void _Process(double delta)
 	{
-		if (_logger == null && _entry.Root.ScriptService?.Logger is { } logger)
+		// Hook up only once connected: the replay below then delivers start-up output (such as early script errors).
+		if (_logger == null && _connected && _entry.Root.ScriptService?.Logger is { } logger)
 		{
 			_logger = logger; logger.NewLog += Log;
 			foreach (var log in logger.Logs.ToArray()) Log(log);
@@ -86,7 +94,7 @@ internal sealed partial class GarkPlaytestAgent : Node
 	}
 	private async void Log(LogDispatcher.LogData log)
 	{
-		if (_role == "client" && log.LogFrom == LogDispatcher.LogFromEnum.Server) return;
+		if (IsClient && log.LogFrom == LogDispatcher.LogFromEnum.Server) return;
 		lock (_evalLock)
 		{
 			// Results of playtest_eval travel through the normal log channel; keep them out of playtest_logs.
@@ -99,7 +107,7 @@ internal sealed partial class GarkPlaytestAgent : Node
 			}
 			_evalOutput?.Add((JsonNode)new JsonObject { ["severity"] = log.LogType.ToString().ToLowerInvariant(), ["content"] = log.Content });
 		}
-		try { await Send(new() { ["log"] = new JsonObject { ["kind"] = "runtime", ["severity"] = log.LogType.ToString().ToLowerInvariant(), ["content"] = log.Content, ["time"] = log.LoggedAt.ToString("O"), ["origin"] = log.LogFrom.ToString() } }); }
+		try { await Send(new() { ["log"] = new JsonObject { ["kind"] = "script", ["severity"] = log.LogType.ToString().ToLowerInvariant(), ["content"] = log.Content, ["time"] = log.LoggedAt.ToString("O"), ["origin"] = log.LogFrom.ToString() } }); }
 		catch (Exception ex) when (ex is IOException or SocketException or ObjectDisposedException or OperationCanceledException) { }
 	}
 	private async Task Run(JsonObject command)
@@ -112,22 +120,17 @@ internal sealed partial class GarkPlaytestAgent : Node
 			var args = command["args"]!.AsObject();
 			if (method == "ready")
 			{
-				while (_entry.Root.Network?.NetInstance == null || (_role == "client" && (!_entry.Root.IsLoaded || _entry.Root.Players.LocalPlayer == null))) await Frame();
-				await Frame(); reply["data"] = State(new());
+				while (_entry.Root.Network?.NetInstance == null || (IsClient && (!_entry.Root.IsLoaded || _entry.Root.Players.LocalPlayer == null))) await Frame();
+				await Frame(); reply["data"] = Brief();
 			}
-			else if (method == "inspect_playtest") { await Wait(args, "wait_seconds", 0); reply["data"] = State(args); }
+			else if (method == "inspect_playtest") { await Wait(args, "wait_seconds", 0); reply["data"] = Inspect(args); }
 			else if (method == "playtest_eval") reply["data"] = await Eval(args);
-			else if (method == "playtest_input") { await Drive(args); reply["data"] = State(new()); }
+			else if (method == "playtest_input") { await Drive(args); reply["data"] = Brief(); }
 			else if (method == "capture_playtest")
 			{
 				await Wait(args, "wait_seconds", 0);
 				if (DisplayServer.GetName() == "headless") throw new InvalidOperationException("The test client has no renderer.");
-				await ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
-				using var image = GetViewport().GetTexture().GetImage();
-				bool jpeg = args["format"]?.ToString() == "jpeg";
-				reply["image"] = Convert.ToBase64String(jpeg ? image.SaveJpgToBuffer(0.85f) : image.SavePngToBuffer());
-				reply["mime_type"] = jpeg ? "image/jpeg" : "image/png";
-				reply["data"] = new JsonObject { ["width"] = image.GetWidth(), ["height"] = image.GetHeight(), ["includes"] = "Actual test gameplay and screen UI" };
+				await Capture(args, reply);
 			}
 			else throw new ArgumentException("Unknown test command.");
 		}
@@ -152,7 +155,7 @@ internal sealed partial class GarkPlaytestAgent : Node
 	}
 	private async Task Drive(JsonObject args)
 	{
-		if (_role != "client" || _entry.Root.Players.LocalPlayer == null) throw new InvalidOperationException("The test player is not ready.");
+		if (!IsClient || _entry.Root.Players.LocalPlayer == null) throw new InvalidOperationException("The test player is not ready.");
 		var keys = (args["keys"]?.AsArray() ?? []).Select(k => OS.FindKeycodeFromString(k!.ToString())).ToArray();
 		if (keys.Any(k => k == Key.None)) throw new ArgumentException("Unknown key name; use W, A, S, D, Space, E, Enter etc.");
 		string[] actions = (args["actions"]?.AsArray() ?? []).Select(a => a!.ToString()).ToArray();
@@ -251,32 +254,75 @@ internal sealed partial class GarkPlaytestAgent : Node
 		foreach (string action in _actions) { Input.ActionRelease(action); GetViewport().PushInput(new InputEventAction { Action = action, Pressed = false }); } _actions.Clear();
 		if (_mouse is { } button) Input.ParseInputEvent(MouseEvent(button, false)); _mouse = null;
 	}
-	private JsonObject State(JsonObject args)
+	/// <summary>Player and camera state only; the hierarchy is inspect_playtest's job.</summary>
+	private JsonObject Brief()
 	{
 		var world = _entry.Root;
-		var all = Descendants(world).ToArray();
-		string parentId = args["parent"]?.ToString() ?? "/";
-		var parent = parentId is "" or "/" ? world : all.FirstOrDefault(i => i.ObjectID == parentId || PathOf(i) == parentId)
-			?? throw new ArgumentException("No test instance at that ID/path.");
-		string query = args["query"]?.ToString() ?? "";
-		var matching = Descendants(parent).Where(i => i.Name.Contains(query, StringComparison.OrdinalIgnoreCase) || i.ClassName.Contains(query, StringComparison.OrdinalIgnoreCase)).ToArray();
-		int offset = (int)Math.Max(0, args["offset"] != null ? GarkValues.Number(args["offset"]!) : 0);
-		int limit = (int)Math.Clamp(args["limit"] != null ? GarkValues.Number(args["limit"]!) : 50, 1, 2000);
 		var player = world.Players.LocalPlayer;
 		var camera = world.Environment.CurrentCamera;
-		return new() { ["loaded"] = world.IsLoaded, ["viewport_size"] = V(GetViewport().GetVisibleRect().Size),
-			["player"] = player == null ? null : new JsonObject { ["id"] = player.ObjectID, ["position"] = V(player.Position), ["rotation"] = V(player.Rotation), ["velocity"] = V(player.Velocity), ["health"] = player.Health, ["can_move"] = player.CanMove },
-			["camera"] = camera == null ? null : new JsonObject { ["position"] = V(camera.Position), ["rotation"] = V(camera.Rotation), ["forward"] = V(camera.Forward) },
-			["instances"] = new JsonArray(matching.Skip(offset).Take(limit).Select(i => (JsonNode)Describe(i)).ToArray()), ["total"] = matching.Length,
-			["next_offset"] = offset + limit < matching.Length ? offset + limit : null };
+		var data = new JsonObject { ["loaded"] = world.IsLoaded, ["viewport_size"] = V(GetViewport().GetVisibleRect().Size),
+			["player"] = player == null ? null : PlayerState(player, true),
+			["camera"] = camera == null ? null : new JsonObject { ["position"] = V(camera.Position), ["rotation"] = V(camera.Rotation), ["forward"] = V(camera.Forward), ["fov"] = camera.Camera3D?.Fov } };
+		var others = world.Players.GetPlayers().Where(p => p != player).ToArray();
+		if (others.Length > 0) data[player == null ? "players" : "other_players"] = new JsonArray(others.Select(p => (JsonNode)PlayerState(p, false)).ToArray());
+		return data;
 	}
-	private static IEnumerable<Instance> Descendants(Instance root)
+	private static JsonObject PlayerState(Player player, bool full)
+	{
+		var data = new JsonObject { ["name"] = player.Name, ["id"] = player.ObjectID, ["position"] = V(player.Position), ["health"] = player.Health };
+		if (!full) return data;
+		data["rotation"] = V(player.Rotation); data["velocity"] = V(player.Velocity); data["can_move"] = player.CanMove;
+		if (player.CharBody3D != null) data["on_floor"] = player.CharBody3D.IsOnFloor();
+		if (CollisionBounds(player) is { } box) data["collision"] = new JsonObject { ["size"] = V(box.Size), ["min"] = V(box.Position), ["max"] = V(box.End) };
+		return data;
+	}
+	/// <summary>The character's own movement collider: what has to fit through doors and under ceilings.</summary>
+	private static Aabb? CollisionBounds(NPC npc)
+	{
+		if (npc.CharBody3D == null) return null;
+		Aabb? box = null;
+		foreach (var shape in npc.CharBody3D.GetChildren().OfType<CollisionShape3D>())
+		{
+			if (shape.Disabled || shape.Shape == null || !shape.IsInsideTree()) continue;
+			Aabb bounds = shape.GlobalTransform * shape.Shape.GetDebugMesh().GetAabb();
+			box = box?.Merge(bounds) ?? bounds;
+		}
+		return box;
+	}
+	private JsonObject Inspect(JsonObject args)
+	{
+		var world = _entry.Root;
+		string parentId = args["parent"]?.ToString() ?? "/";
+		string parentPath = parentId.StartsWith('/') ? parentId : "/" + parentId;
+		var parent = parentId is "" or "/" ? world : Descendants(world).FirstOrDefault(i => i.ObjectID == parentId || PathOf(i) == parentPath)
+			?? throw new ArgumentException("No test instance at that ID/path.");
+		int depth = args["depth"] != null ? (int)Math.Clamp(GarkValues.Number(args["depth"]!), 1, int.MaxValue) : int.MaxValue;
+		string query = args["query"]?.ToString() ?? "";
+		var matching = Descendants(parent, depth).Where(i => i.Name.Contains(query, StringComparison.OrdinalIgnoreCase) || i.ClassName.Contains(query, StringComparison.OrdinalIgnoreCase)).ToArray();
+		int offset = (int)Math.Max(0, args["offset"] != null ? GarkValues.Number(args["offset"]!) : 0);
+		int limit = (int)Math.Clamp(args["limit"] != null ? GarkValues.Number(args["limit"]!) : 50, 1, 2000);
+		var instances = new JsonArray();
+		int size = 0, next = offset;
+		foreach (var item in matching.Skip(offset).Take(limit))
+		{
+			var data = Describe(item);
+			int cost = data.ToJsonString().Length;
+			if (instances.Count > 0 && size + cost > MaxPageChars) break;
+			instances.Add((JsonNode)data); size += cost; next++;
+		}
+		var result = Brief();
+		result["parent"] = parent is World ? "/" : PathOf(parent);
+		result["instances"] = instances; result["total"] = matching.Length;
+		result["next_offset"] = next < matching.Length ? next : null;
+		return result;
+	}
+	private static IEnumerable<Instance> Descendants(Instance root, int depth = int.MaxValue)
 	{
 		foreach (var child in root.GetChildren())
 		{
 			if (child.IsDeleted || child.GetType().IsDefined(typeof(ExplorerExcludeAttribute), false)) continue;
 			yield return child;
-			foreach (var descendant in Descendants(child)) yield return descendant;
+			if (depth > 1) foreach (var descendant in Descendants(child, depth - 1)) yield return descendant;
 		}
 	}
 	private static string PathOf(Instance item) => item is World ? "" : PathOf(item.Parent!) + "/" + item.Name;
@@ -292,7 +338,57 @@ internal sealed partial class GarkPlaytestAgent : Node
 		}
 		if (item is UILabel label) data["text"] = label.Text;
 		if (item is UITextInput input) data["text"] = input.Text;
+		int children = Descendants(item, 1).Count();
+		if (children > 0) data["child_count"] = children;
 		return data;
+	}
+	/// <summary>Screenshot from the game camera, or from a temporary camera that never touches game state.</summary>
+	private async Task Capture(JsonObject args, JsonObject reply)
+	{
+		var game = _entry.Root.Environment.CurrentCamera?.Camera3D is { } current && current.IsInsideTree() ? current : GetViewport().GetCamera3D();
+		var data = new JsonObject { ["includes"] = "Actual test gameplay and screen UI" };
+		Camera3D? temporary = null;
+		if (args["position"] != null || args["look_at"] != null || args["fov"] != null)
+		{
+			if (game == null) throw new InvalidOperationException("The test client has no active camera yet.");
+			Vector3 from = args["position"] != null ? GarkValues.Vector3Value(args["position"]!) : game.GlobalPosition;
+			float fov = args["fov"] != null ? (float)GarkValues.Number(args["fov"]!) : game.Fov;
+			if (!from.IsFinite() || !float.IsFinite(fov) || fov is < 1 or > 179) throw new ArgumentException("position must be finite and fov between 1 and 179 degrees.");
+			temporary = new Camera3D { Fov = fov, Near = game.Near, Far = game.Far, CullMask = game.CullMask, Environment = game.Environment, Attributes = game.Attributes };
+			// A direct child of the viewport, so a moving game camera cannot drag it along.
+			game.GetViewport().AddChild(temporary);
+			temporary.GlobalPosition = from;
+			if (args["look_at"] != null)
+			{
+				Vector3 target = GarkValues.Vector3Value(args["look_at"]!);
+				Vector3 direction = target - from;
+				if (!target.IsFinite() || direction.IsZeroApprox()) throw new ArgumentException("look_at must be a finite point different from position.");
+				temporary.LookAt(target, Mathf.Abs(direction.Normalized().Y) > 0.999f ? Vector3.Forward : Vector3.Up);
+			}
+			else temporary.GlobalBasis = game.GlobalBasis;
+			temporary.MakeCurrent();
+			data["camera"] = new JsonObject { ["temporary"] = true, ["position"] = V(from), ["forward"] = V(-temporary.GlobalBasis.Z), ["fov"] = fov };
+		}
+		else if (game != null) data["camera"] = new JsonObject { ["position"] = V(game.GlobalPosition), ["forward"] = V(-game.GlobalBasis.Z), ["fov"] = game.Fov };
+		try
+		{
+			if (temporary != null) await Frame();
+			await ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
+			using var image = GetViewport().GetTexture().GetImage();
+			bool jpeg = args["format"]?.ToString() == "jpeg";
+			reply["image"] = Convert.ToBase64String(jpeg ? image.SaveJpgToBuffer(0.85f) : image.SavePngToBuffer());
+			reply["mime_type"] = jpeg ? "image/jpeg" : "image/png";
+			data["width"] = image.GetWidth(); data["height"] = image.GetHeight();
+			reply["data"] = data;
+		}
+		finally
+		{
+			if (temporary != null)
+			{
+				if (IsInstanceValid(game)) game!.MakeCurrent();
+				temporary.QueueFree();
+			}
+		}
 	}
 	private static JsonArray V(Vector3 v) => new(v.X, v.Y, v.Z);
 	private static JsonArray V(Vector2 v) => new(v.X, v.Y);

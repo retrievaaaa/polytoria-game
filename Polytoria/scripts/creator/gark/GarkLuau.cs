@@ -62,8 +62,14 @@ internal static partial class GarkLuau
 			reparent = function(id, parent) return invoke('reparent', {id=id, parent=parent}) end,
 			delete = function(id) return invoke('delete', {id=id}) end,
 			get = function(id) return invoke('get', {id=id}) end,
-			children = function(id) return invoke('children', {id=id}) end,
-			descendants = function(id, class_name) return invoke('descendants', {id=id, class_name=class_name}) end,
+			children = function(id, include_properties)
+				if type(include_properties) == 'table' and include_properties.include_properties ~= nil then include_properties = include_properties.include_properties end
+				return invoke('children', {id=id, include_properties=include_properties})
+			end,
+			descendants = function(id, class_name, include_properties)
+				if type(class_name) == 'table' then class_name, include_properties = class_name.class_name, class_name.include_properties end
+				return invoke('descendants', {id=id, class_name=class_name, include_properties=include_properties})
+			end,
 			find = function(path) return invoke('find', {path=path}) end,
 			selection = function() return invoke('selection', {}) end,
 			bounds = function(id) return invoke('bounds', {id=id}) end,

@@ -41,8 +41,7 @@ public partial class GarkIntegrationTests
 			print('Built', 125, 'café 🌲')
 			return {root=m, count=125}
 			""" }, default);
-		string handle = result.Data["result"]!["root"]!.GetValue<string>();
-		var root = (Model)world.GetObjectFromID(result.Data["ids"]![handle]!.GetValue<string>())!;
+		var root = (Model)world.GetObjectFromID(result.Data["result"]!["root"]!.GetValue<string>())!;
 		Check(root.GetChildren().Length == 125 && result.Data["operations"]!.GetValue<int>() == 126, "Luau loops/functions build beyond 100 objects in one batch");
 		Check(result.Data["output"]!.ToString().Contains("café 🌲") && root.Name == "Procedural café", "construction Unicode round-trip and output");
 		var first = (Part)root.GetChildren()[0];
