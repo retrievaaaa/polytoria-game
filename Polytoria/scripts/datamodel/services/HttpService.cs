@@ -6,8 +6,10 @@ using Polytoria.Attributes;
 using Polytoria.Datamodel.Data;
 using Polytoria.Scripting;
 using Polytoria.Shared;
+using Polytoria.Utils;
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
@@ -120,13 +122,19 @@ public sealed partial class HttpService : Instance
 				}
 			}
 		}
-		msg.Headers.Add("PT-World-ID", Root.WorldID.ToString());
+		msg.Headers.Add("PT-Game-ID", Root.WorldID.ToString());
 
 		using HttpResponseMessage res = await _client.SendAsync(msg);
 		Dictionary<string, string> headers = [];
 
 		foreach ((string key, IEnumerable<string> val) in res.Headers)
 		{
+			string normalized = key.ToLowerInvariant().Replace("-", "").Replace("_", "").Replace(" ", "");
+			if (normalized.Contains("ptgameid"))
+			{
+				continue;
+			}
+
 			headers[key] = string.Join(",", val);
 		}
 
@@ -176,6 +184,12 @@ public sealed partial class HttpService : Instance
 			if (IPAddress.TryParse(host, out _))
 			{
 				throw new InvalidOperationException("Access to raw IP addresses is not allowed in production");
+			}
+
+			var addresses = Dns.GetHostAddresses(host);
+			if (addresses.Any(ip => ip.IsPrivate()))
+			{
+				throw new InvalidOperationException("Access to private IP addresses is not allowed in production");
 			}
 		}
 	}
@@ -330,6 +344,12 @@ public sealed partial class HttpService : Instance
 		{
 			foreach ((string key, string val) in headers)
 			{
+				string normalized = key.ToLowerInvariant().Replace("-", "").Replace("_", "").Replace(" ", "");
+				if (normalized.Contains("ptgameid"))
+				{
+					continue;
+				}
+
 				if (string.Equals(key, "Content-Type", StringComparison.OrdinalIgnoreCase))
 				{
 					msg.Content?.Headers.ContentType = new MediaTypeHeaderValue(val);

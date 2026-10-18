@@ -58,6 +58,7 @@ public sealed partial class World : Instance
 
 	public PTSignal Loaded { get; private set; } = new();
 
+	[Attributes.Obsolete("Use 'Hooks.Updated' instead.")]
 	[ScriptProperty]
 	public PTSignal<double> Rendered { get; private set; } = new();
 
@@ -124,6 +125,7 @@ public sealed partial class World : Instance
 	public IOService IO => FindChild<IOService>("IO")!;
 	public WorldsService Worlds => FindChild<WorldsService>("Worlds")!;
 	public SocialService Social => FindChild<SocialService>("Social")!;
+	public HookService Hooks => FindChild<HookService>("Hooks")!;
 #if CREATOR
 	public CreatorContextService CreatorContext => FindChild<CreatorContextService>("CreatorContext")!;
 #endif
@@ -220,6 +222,12 @@ public sealed partial class World : Instance
 	public async Task<NetworkedObject?> GetNetworkedObject(string networkID)
 	{
 		return await WaitForNetObjectAsync(networkID);
+	}
+
+	[ScriptMethod]
+	public double GetFPS()
+	{
+		return Engine.GetFramesPerSecond();
 	}
 
 	[SyncVar]
@@ -730,6 +738,14 @@ public sealed partial class World : Instance
 			tweenService = Globals.LoadInstance<TweenService>(Root);
 			tweenService.NameOverride = "Tween";
 			tweenService.NetworkParent = this;
+		}
+
+		HookService? hookService = FindChild<HookService>("Hooks");
+		if (hookService == null)
+		{
+			hookService = Globals.LoadInstance<HookService>(Root);
+			hookService.NameOverride = "Hooks";
+			hookService.NetworkParent = this;
 		}
 
 		CaptureService? captureService = FindChild<CaptureService>("Capture");
