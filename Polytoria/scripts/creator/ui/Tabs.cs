@@ -64,6 +64,17 @@ public sealed partial class Tabs : Control
 	private readonly Dictionary<Control, int> _controlToIdx = [];
 	private readonly Dictionary<string, Control> _openedFiles = [];
 
+	internal TextEditorContainer? FindTextEditor(string absolutePath) =>
+		_openedFiles.Values.OfType<TextEditorContainer>().FirstOrDefault(editor =>
+			string.Equals(editor.TargetFilePathAbsolute.Replace('\\', '/'), absolutePath.Replace('\\', '/'),
+				System.OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal));
+
+	internal void FocusWorld(World world)
+	{
+		if (_orderedControls.OfType<WorldContainer>().FirstOrDefault(container => container.World == world) is { } target)
+			CurrentControl = target;
+	}
+
 	private Control _tabsClip = null!;
 	private TabBar _tabBar = null!;
 	private PanelContainer _tabsContainer = null!;

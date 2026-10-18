@@ -40,12 +40,14 @@ public partial class CreatorInterface : Control, IScriptObject
 	private const string AddonReqPermPopupPath = "res://scenes/creator/popups/addon_perm_request.tscn";
 
 	private const string CreditPopupPath = "res://scenes/creator/popups/credits.tscn";
+	private const string WelcomePopupPath = "res://scenes/creator/popups/welcome.tscn";
 	private const string CreatorThemePath = "res://resources/themes/creator/creator.tres";
 	private string? _pendingLegacyWorld;
 	private PackedScene _insertMenuPopupPacked = GD.Load<PackedScene>("res://scenes/creator/popups/insert/insert_menu.tscn");
 
 	private Theme _creatorTheme = null!;
 	private Label? _followCursorLabel;
+	private GarkPopup? _garkPopup;
 
 	public StatusBar? StatusBar { get; internal set; }
 	public LoadOverlay? LoadOverlay { get; internal set; }
@@ -117,6 +119,11 @@ public partial class CreatorInterface : Control, IScriptObject
 		ApplyFullscreen();
 		ApplyVSync();
 		ApplyFpsCap();
+
+		// Wait until startup and UI scaling have finished before presenting the launch welcome.
+		Callable.From(PopupWelcome).CallDeferred();
+
+		AddChild(new Gark.GarkMcpHost());
 
 		base._Ready();
 	}
@@ -556,6 +563,27 @@ public partial class CreatorInterface : Control, IScriptObject
 		PopupWindow(popup);
 	}
 
+	public void OpenGarkSettings()
+	{
+		SettingsPopup popup = Globals.CreateInstanceFromScene<SettingsPopup>(SettingsPopupPath);
+		popup.InitialSection = "gark";
+		PopupWindow(popup);
+	}
+
+	public void OpenGark()
+	{
+		if (!IsInstanceValid(_garkPopup))
+		{
+			_garkPopup = new GarkPopup();
+			PopupWindow(_garkPopup);
+		}
+		else
+		{
+			_garkPopup!.Show();
+			_garkPopup.GrabFocus();
+		}
+	}
+
 	public void OpenPublish(Instance target)
 	{
 		PublishPopup popup = Globals.CreateInstanceFromScene<PublishPopup>(PublishPopupPath);
@@ -599,6 +627,22 @@ public partial class CreatorInterface : Control, IScriptObject
 	{
 		CreditsPopup popup = Globals.CreateInstanceFromScene<CreditsPopup>(CreditPopupPath);
 		PopupWindow(popup);
+	}
+
+	private void PopupWelcome()
+	{
+		WelcomePopup popup = Globals.CreateInstanceFromScene<WelcomePopup>(WelcomePopupPath);
+		ColorRect dimmer = new()
+		{
+			Name = "WelcomeDimmer",
+			Color = new Color(0, 0, 0, 0.65f),
+			MouseFilter = MouseFilterEnum.Stop,
+		};
+		AddChild(dimmer);
+		dimmer.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
+		dimmer.AddChild(popup);
+		popup.TreeExiting += dimmer.QueueFree;
+		popup.Open();
 	}
 
 	public static void PopupManageAddons()

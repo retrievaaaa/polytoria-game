@@ -19,6 +19,15 @@ public partial class AppEntry : Node
 	public async override void _Ready()
 	{
 		Dictionary<string, string> cmdargs = ReadCmdArgs();
+#if CREATOR
+		// MCP stdio bridge for AI agents: forwards to the running Creator, never opens a window.
+		if (cmdargs.ContainsKey("gark-mcp"))
+		{
+			int exitCode = Polytoria.Creator.Gark.GarkMcpBridge.Run(cmdargs);
+			GetTree().Quit(exitCode);
+			return;
+		}
+#endif
 		bool isApiRefGen = cmdargs.ContainsKey("genapi");
 		bool isCreator = cmdargs.ContainsKey("creator");
 		bool isLtChild = cmdargs.ContainsKey("ltchild");
@@ -91,8 +100,15 @@ public partial class AppEntry : Node
 			Node app = Globals.Singleton.SwitchEntry(entry);
 			if (app is ClientEntry ce)
 			{
+#if CREATOR
+				Polytoria.Creator.Gark.GarkPlaytestAgent.Attach(ce, cmdargs);
+#endif
 				ce.Entry();
 			}
+#if DEBUG && CREATOR
+			if (isCreator && cmdargs.ContainsKey("garktest"))
+				app.AddChild(new GarkIntegrationTests());
+#endif
 			QueueFree();
 		}).CallDeferred();
 	}

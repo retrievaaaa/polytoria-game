@@ -20,6 +20,9 @@ public sealed partial class CreatorHistory : Instance
 	private readonly Stack<HistoryAction> _undoStack = new();
 	private readonly Stack<HistoryAction> _redoStack = new();
 
+	internal string? NextUndoTitle => _undoStack.TryPeek(out HistoryAction? action) ? action.Title : null;
+	internal string? NextRedoTitle => _redoStack.TryPeek(out HistoryAction? action) ? action.Title : null;
+
 	public void Undo()
 	{
 		if (_undoStack.Count == 0)

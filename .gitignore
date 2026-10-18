@@ -102,3 +102,8 @@ Thumbs.db
 desktop.ini
 
 Polytoria/builds/
+/Polytoria/.tmp-input-adapter-check/debug
+/Polytoria/rust
+/Polytoria/target/debug/.fingerprint/accesskit_winit-c255e31ec7af6075
+/Polytoria/target/debug
+/Polytoria/target

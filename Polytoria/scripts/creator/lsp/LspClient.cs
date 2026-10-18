@@ -6,6 +6,7 @@ using Polytoria.Creator.LSP.Schemas;
 using Polytoria.Shared;
 using System;
 using System.Collections.Generic;
+using System.Collections.Concurrent;
 using System.IO;
 using System.Text;
 using System.Text.Json;
@@ -19,7 +20,7 @@ public class LspClient : IDisposable
 	private readonly Stream _input;
 	private readonly Stream _output;
 	private readonly SemaphoreSlim _writeLock = new(1, 1);
-	private readonly Dictionary<int, TaskCompletionSource<JsonElement>> _pendingRequests = [];
+	private readonly ConcurrentDictionary<int, TaskCompletionSource<JsonElement>> _pendingRequests = [];
 	private int _requestId;
 	private readonly Task? _readerTask;
 	private readonly CancellationTokenSource _cts = new();
@@ -35,7 +36,7 @@ public class LspClient : IDisposable
 		_readerTask = Task.Run(ReadMessagesAsync);
 	}
 
-	public async Task InitializeAsync(string workspacePath)
+	public async Task InitializeAsync(string workspacePath, CancellationToken cancellationToken = default, bool pullDiagnostics = false)
 	{
 		LspInitializeParams initParams = new()
 		{
@@ -44,6 +45,7 @@ public class LspClient : IDisposable
 			{
 				TextDocument = new()
 				{
+					Diagnostic = pullDiagnostics ? new() : null,
 					Completion = new()
 					{
 						CompletionItem = new() { SnippetSupport = false }
@@ -76,7 +78,7 @@ public class LspClient : IDisposable
 			}
 		};
 
-		await SendRequestAsync<LspInitializeResult>("initialize", initParams);
+		await SendRequestAsync<LspInitializeResult>("initialize", initParams, cancellationToken);
 		await SendNotificationAsync("initialized", new EmptyParams());
 	}
 
@@ -131,12 +133,15 @@ public class LspClient : IDisposable
 		return rawResult.Deserialize(LspJsonContext.Default.LspCompletionItemArray);
 	}
 
+	public Task<JsonElement> RequestDiagnosticsAsync(string path, CancellationToken cancellationToken) =>
+		SendRequestAsync<JsonElement>("textDocument/diagnostic", new LspDiagnosticParams { TextDocument = new() { Uri = PathToUri(path) } }, cancellationToken);
+
 #pragma warning disable IL2026 // Members annotated with 'RequiresUnreferencedCodeAttribute' require dynamic access otherwise can break functionality when trimming application code
 #pragma warning disable IL3050 // Calling members annotated with 'RequiresDynamicCodeAttribute' may break functionality when AOT compiling.
 	private async Task<T?> SendRequestAsync<T>(string method, object? parameters = null, CancellationToken cancellationToken = default)
 	{
 		int id = Interlocked.Increment(ref _requestId);
-		TaskCompletionSource<JsonElement> tcs = new();
+		TaskCompletionSource<JsonElement> tcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
 		_pendingRequests[id] = tcs;
 
 		try
@@ -151,7 +156,7 @@ public class LspClient : IDisposable
 		}
 		finally
 		{
-			_pendingRequests.Remove(id);
+			_pendingRequests.TryRemove(id, out _);
 		}
 	}
 
@@ -266,11 +271,11 @@ public class LspClient : IDisposable
 				{
 					if (root.TryGetProperty("result", out JsonElement result))
 					{
-						tcs.SetResult(result.Clone());
+						tcs.TrySetResult(result.Clone());
 					}
 					else if (root.TryGetProperty("error", out JsonElement error))
 					{
-						tcs.SetException(new Exception($"LSP Error: {error}"));
+						tcs.TrySetException(new Exception($"LSP Error: {error}"));
 					}
 				}
 			}

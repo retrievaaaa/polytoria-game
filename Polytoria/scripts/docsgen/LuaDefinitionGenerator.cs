@@ -29,6 +29,13 @@ public class LuaDefinitionGenerator
 			File.Delete(file);
 		}
 
+		File.WriteAllText(atFolder.PathJoin("def.json"), JsonSerializer.Serialize(refer, APIRefGenerationContext.Default.APIReferenceRoot));
+		File.WriteAllText(atFolder.PathJoin("def.d.luau"), GenerateDefinitions(refer));
+	}
+
+	/// <summary>The complete Luau type definitions: bundled globals, enums and every scripting class.</summary>
+	public static string GenerateDefinitions(APIReferenceRoot refer)
+	{
 		StringBuilder builder = new();
 
 		foreach (string item in DirAccess.GetFilesAt(CodeHintPath))
@@ -40,8 +47,6 @@ public class LuaDefinitionGenerator
 				builder.AppendLine(content);
 			}
 		}
-
-		File.WriteAllText(atFolder.PathJoin("def.json"), JsonSerializer.Serialize(refer, APIRefGenerationContext.Default.APIReferenceRoot));
 
 		// Add PTSignal type definitions
 		builder.AppendLine("declare class PTSignalConnection");
@@ -86,7 +91,7 @@ public class LuaDefinitionGenerator
 			builder.AppendLine(GenerateClass(item));
 		}
 
-		File.WriteAllText(atFolder.PathJoin("def.d.luau"), builder.ToString());
+		return builder.ToString();
 	}
 
 	public static string GenerateClass(ScriptClass c)

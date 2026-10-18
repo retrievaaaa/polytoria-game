@@ -6,6 +6,13 @@ namespace Polytoria.Creator.Settings;
 
 public static class CreatorSettingKeys
 {
+	public static class Gark
+	{
+		public const string McpEnabled = "gark.mcp_enabled";
+		public const string McpPort = "gark.mcp_port";
+		public const string McpAllowEdits = "gark.mcp_allow_edits";
+	}
+
 	public static class Creator
 	{
 		public const string OpenWebAfterPublish = "creator.open_web_after_publish";

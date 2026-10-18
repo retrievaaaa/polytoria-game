@@ -80,6 +80,14 @@ public sealed partial class Ribbon : PanelContainer
 		};
 
 		_ribbonGroup.Pressed += OnRibbonChanged;
+
+		_container.AddChild(new VSeparator());
+		Button gark = new() { Name = "Gark", Text = "Gark", TooltipText = "Gark: connect your AI agent to Creator (MCP)", CustomMinimumSize = new Vector2(62, 0),
+			Icon = GD.Load<Texture2D>("res://assets/textures/creator/gark.png"), ExpandIcon = true,
+			IconAlignment = HorizontalAlignment.Center, VerticalIconAlignment = VerticalAlignment.Top };
+		gark.AddThemeConstantOverride("icon_max_width", 36);
+		gark.Pressed += CreatorService.Interface.OpenGark;
+		_container.AddChild(gark);
 	}
 
 	public override void _UnhandledKeyInput(InputEvent @event)

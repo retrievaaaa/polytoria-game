@@ -51,12 +51,26 @@ public class LspClientCapabilities
 
 public class LspTextDocumentCapabilities
 {
+	[JsonPropertyName("diagnostic")]
+	public LspDiagnosticCapability? Diagnostic { get; set; }
 	[JsonPropertyName("completion")]
 	public LspCompletionCapability? Completion { get; set; }
 	[JsonPropertyName("hover")]
 	public LspHoverCapability? Hover { get; set; }
 	[JsonPropertyName("synchronization")]
 	public LspSynchronizationCapability? Synchronization { get; set; }
+}
+
+public class LspDiagnosticCapability
+{
+	[JsonPropertyName("relatedDocumentSupport")]
+	public bool RelatedDocumentSupport { get; set; } = true;
+}
+
+public class LspDiagnosticParams
+{
+	[JsonPropertyName("textDocument")]
+	public LspTextDocumentIdentifier TextDocument { get; set; } = new();
 }
 
 public class LspCompletionCapability
@@ -394,6 +408,7 @@ public sealed class EmptyParams
 [JsonSerializable(typeof(List<object>))]
 [JsonSerializable(typeof(Dictionary<string, object>))]
 [JsonSerializable(typeof(LspPublishDiagnosticsParams))]
+[JsonSerializable(typeof(LspDiagnosticParams))]
 [JsonSerializable(typeof(LspDiagnostic))]
 [JsonSerializable(typeof(List<LspDiagnostic>))]
 [JsonSerializable(typeof(LspRange))]

@@ -1,0 +1,397 @@
+[gd_scene format=3]
+
+[ext_resource type="Theme" path="res://resources/themes/creator/creator.tres" id="1_theme"]
+[ext_resource type="Script" path="res://scripts/creator/ui/popups/WelcomePopup.cs" id="2_script"]
+[ext_resource type="Texture2D" path="res://assets/textures/creator/close_x2.svg" id="3_close"]
+[ext_resource type="Texture2D" path="res://assets/textures/ui-icons/cube.svg" id="4_cube"]
+[ext_resource type="Texture2D" path="res://assets/textures/ui-icons/messages.svg" id="5_gark"]
+[ext_resource type="Texture2D" path="res://assets/textures/ui-icons/code.svg" id="6_code"]
+[ext_resource type="FontFile" path="res://assets/fonts/creator/JetBrainsMono-Regular.ttf" id="7_mono"]
+
+[sub_resource type="StyleBoxFlat" id="Style_shell"]
+bg_color = Color(0.149, 0.149, 0.149, 1)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.27, 0.29, 0.32, 1)
+corner_radius_top_left = 10
+corner_radius_top_right = 10
+corner_radius_bottom_right = 10
+corner_radius_bottom_left = 10
+shadow_color = Color(0, 0, 0, 0.4)
+shadow_size = 10
+shadow_offset = Vector2(0, 3)
+
+[sub_resource type="StyleBoxFlat" id="Style_features"]
+content_margin_left = 16.0
+content_margin_top = 16.0
+content_margin_right = 16.0
+content_margin_bottom = 16.0
+bg_color = Color(0.12, 0.12, 0.12, 1)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.22, 0.22, 0.22, 1)
+corner_radius_top_left = 8
+corner_radius_top_right = 8
+corner_radius_bottom_right = 8
+corner_radius_bottom_left = 8
+
+[sub_resource type="StyleBoxFlat" id="Style_icon"]
+content_margin_left = 10.0
+content_margin_top = 10.0
+content_margin_right = 10.0
+content_margin_bottom = 10.0
+bg_color = Color(0.08, 0.21, 0.30, 1)
+corner_radius_top_left = 8
+corner_radius_top_right = 8
+corner_radius_bottom_right = 8
+corner_radius_bottom_left = 8
+
+[sub_resource type="StyleBoxFlat" id="Style_primary"]
+content_margin_left = 22.0
+content_margin_top = 12.0
+content_margin_right = 22.0
+content_margin_bottom = 12.0
+bg_color = Color(0, 0.52, 0.9, 1)
+border_width_bottom = 3
+border_color = Color(0, 0.38, 0.68, 1)
+corner_radius_top_left = 6
+corner_radius_top_right = 6
+corner_radius_bottom_right = 6
+corner_radius_bottom_left = 6
+
+[sub_resource type="StyleBoxFlat" id="Style_primary_hover"]
+content_margin_left = 22.0
+content_margin_top = 12.0
+content_margin_right = 22.0
+content_margin_bottom = 12.0
+bg_color = Color(0.08, 0.61, 1, 1)
+border_width_bottom = 3
+border_color = Color(0, 0.43, 0.76, 1)
+corner_radius_top_left = 6
+corner_radius_top_right = 6
+corner_radius_bottom_right = 6
+corner_radius_bottom_left = 6
+
+[sub_resource type="StyleBoxFlat" id="Style_primary_pressed"]
+content_margin_left = 22.0
+content_margin_top = 13.0
+content_margin_right = 22.0
+content_margin_bottom = 11.0
+bg_color = Color(0, 0.43, 0.76, 1)
+corner_radius_top_left = 6
+corner_radius_top_right = 6
+corner_radius_bottom_right = 6
+corner_radius_bottom_left = 6
+
+[sub_resource type="StyleBoxFlat" id="Style_focus"]
+draw_center = false
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.62, 0.83, 1, 1)
+corner_radius_top_left = 8
+corner_radius_top_right = 8
+corner_radius_bottom_right = 8
+corner_radius_bottom_left = 8
+expand_margin_left = 3.0
+expand_margin_top = 3.0
+expand_margin_right = 3.0
+expand_margin_bottom = 3.0
+
+[sub_resource type="StyleBoxEmpty" id="StyleBoxEmpty_hero"]
+
+[sub_resource type="Gradient" id="Gradient_hero"]
+colors = PackedColorArray(0.05, 0.32, 0.5, 0.38, 0.05, 0.32, 0.5, 0)
+
+[sub_resource type="GradientTexture2D" id="Texture_hero"]
+gradient = SubResource("Gradient_hero")
+width = 512
+height = 256
+fill = 1
+fill_from = Vector2(0.75, 0.5)
+fill_to = Vector2(0.98, 0.5)
+
+[node name="WelcomePopup" type="Window" node_paths=PackedStringArray("_startButton", "_closeButton")]
+title = "Welcome to Creator 3.0"
+size = Vector2i(780, 640)
+visible = false
+transparent_bg = true
+borderless = true
+unresizable = true
+transient = true
+exclusive = true
+transparent = true
+minimize_disabled = true
+maximize_disabled = true
+theme = ExtResource("1_theme")
+script = ExtResource("2_script")
+_startButton = NodePath("Inset/Shell/Margin/Layout/Footer/Start")
+_closeButton = NodePath("Inset/Shell/Margin/Layout/Top/Close")
+
+[node name="Inset" type="MarginContainer" parent="."]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/margin_left = 12
+theme_override_constants/margin_top = 12
+theme_override_constants/margin_right = 12
+theme_override_constants/margin_bottom = 12
+
+[node name="Shell" type="PanelContainer" parent="Inset"]
+layout_mode = 2
+theme_override_styles/panel = SubResource("Style_shell")
+
+[node name="Margin" type="MarginContainer" parent="Inset/Shell"]
+layout_mode = 2
+theme_override_constants/margin_left = 30
+theme_override_constants/margin_top = 18
+theme_override_constants/margin_right = 30
+theme_override_constants/margin_bottom = 20
+
+[node name="Layout" type="VBoxContainer" parent="Inset/Shell/Margin"]
+layout_mode = 2
+theme_override_constants/separation = 14
+
+[node name="Top" type="HBoxContainer" parent="Inset/Shell/Margin/Layout"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="Mark" type="TextureRect" parent="Inset/Shell/Margin/Layout/Top"]
+custom_minimum_size = Vector2(18, 18)
+layout_mode = 2
+size_flags_vertical = 4
+self_modulate = Color(0.27, 0.68, 1, 1)
+texture = ExtResource("4_cube")
+expand_mode = 1
+stretch_mode = 5
+
+[node name="Edition" type="Label" parent="Inset/Shell/Margin/Layout/Top"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_colors/font_color = Color(0.65, 0.7, 0.76, 1)
+theme_override_fonts/font = ExtResource("7_mono")
+theme_override_font_sizes/font_size = 11
+text = "POLYTORIA CREATOR  /  GENERATION 03"
+text_overrun_behavior = 3
+
+[node name="Close" type="Button" parent="Inset/Shell/Margin/Layout/Top"]
+custom_minimum_size = Vector2(28, 28)
+layout_mode = 2
+tooltip_text = "Close welcome (Esc)"
+accessibility_name = "Close welcome"
+icon = ExtResource("3_close")
+expand_icon = true
+flat = true
+theme_override_constants/icon_max_width = 14
+
+[node name="Scroll" type="ScrollContainer" parent="Inset/Shell/Margin/Layout"]
+layout_mode = 2
+size_flags_vertical = 3
+horizontal_scroll_mode = 0
+follow_focus = true
+
+[node name="Content" type="VBoxContainer" parent="Inset/Shell/Margin/Layout/Scroll"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 14
+
+[node name="Hero" type="PanelContainer" parent="Inset/Shell/Margin/Layout/Scroll/Content"]
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBoxEmpty_hero")
+
+[node name="Glow" type="TextureRect" parent="Inset/Shell/Margin/Layout/Scroll/Content/Hero"]
+layout_mode = 2
+mouse_filter = 2
+texture = SubResource("Texture_hero")
+expand_mode = 1
+stretch_mode = 0
+
+[node name="Words" type="VBoxContainer" parent="Inset/Shell/Margin/Layout/Scroll/Content/Hero"]
+layout_mode = 2
+theme_override_constants/separation = 0
+
+[node name="Title" type="Label" parent="Inset/Shell/Margin/Layout/Scroll/Content/Hero/Words"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.96, 0.97, 0.99, 1)
+theme_override_font_sizes/font_size = 28
+text = "Welcome to Creator 3.0."
+autowrap_mode = 3
+
+[node name="AINative" type="Label" parent="Inset/Shell/Margin/Layout/Scroll/Content/Hero/Words"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.27, 0.68, 1, 1)
+theme_override_font_sizes/font_size = 40
+text = "AI-native."
+
+[node name="Gap" type="Control" parent="Inset/Shell/Margin/Layout/Scroll/Content/Hero/Words"]
+custom_minimum_size = Vector2(0, 6)
+layout_mode = 2
+mouse_filter = 2
+
+[node name="Intro" type="Label" parent="Inset/Shell/Margin/Layout/Scroll/Content/Hero/Words"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.73, 0.75, 0.79, 1)
+theme_override_font_sizes/font_size = 15
+text = "Meet the next generation of Creator. Bring your ideas,\nand start synthesizing your next game."
+autowrap_mode = 3
+
+[node name="Features" type="PanelContainer" parent="Inset/Shell/Margin/Layout/Scroll/Content"]
+layout_mode = 2
+theme_override_styles/panel = SubResource("Style_features")
+
+[node name="List" type="VBoxContainer" parent="Inset/Shell/Margin/Layout/Scroll/Content/Features"]
+layout_mode = 2
+theme_override_constants/separation = 14
+
+[node name="Heading" type="Label" parent="Inset/Shell/Margin/Layout/Scroll/Content/Features/List"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.52, 0.57, 0.63, 1)
+theme_override_fonts/font = ExtResource("7_mono")
+theme_override_font_sizes/font_size = 11
+text = "LESS BUSYWORK. MORE POSSIBILITY."
+autowrap_mode = 3
+
+[node name="Build" type="HBoxContainer" parent="Inset/Shell/Margin/Layout/Scroll/Content/Features/List"]
+layout_mode = 2
+theme_override_constants/separation = 14
+
+[node name="Icon" type="PanelContainer" parent="Inset/Shell/Margin/Layout/Scroll/Content/Features/List/Build"]
+custom_minimum_size = Vector2(42, 42)
+layout_mode = 2
+size_flags_vertical = 0
+theme_override_styles/panel = SubResource("Style_icon")
+
+[node name="Texture" type="TextureRect" parent="Inset/Shell/Margin/Layout/Scroll/Content/Features/List/Build/Icon"]
+custom_minimum_size = Vector2(22, 22)
+layout_mode = 2
+self_modulate = Color(0.36, 0.73, 1, 1)
+texture = ExtResource("4_cube")
+expand_mode = 1
+stretch_mode = 5
+
+[node name="Text" type="VBoxContainer" parent="Inset/Shell/Margin/Layout/Scroll/Content/Features/List/Build"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 4
+
+[node name="Title" type="Label" parent="Inset/Shell/Margin/Layout/Scroll/Content/Features/List/Build/Text"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.92, 0.94, 0.96, 1)
+theme_override_font_sizes/font_size = 16
+text = "You imagine it. AI builds it."
+autowrap_mode = 3
+
+[node name="Description" type="Label" parent="Inset/Shell/Margin/Layout/Scroll/Content/Features/List/Build/Text"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.65, 0.69, 0.74, 1)
+theme_override_font_sizes/font_size = 14
+text = "Let AI take the heavy lifting off your hands, so you can focus on the game you want to make."
+autowrap_mode = 3
+
+[node name="Gark" type="HBoxContainer" parent="Inset/Shell/Margin/Layout/Scroll/Content/Features/List"]
+layout_mode = 2
+theme_override_constants/separation = 14
+
+[node name="Icon" type="PanelContainer" parent="Inset/Shell/Margin/Layout/Scroll/Content/Features/List/Gark"]
+custom_minimum_size = Vector2(42, 42)
+layout_mode = 2
+size_flags_vertical = 0
+theme_override_styles/panel = SubResource("Style_icon")
+
+[node name="Texture" type="TextureRect" parent="Inset/Shell/Margin/Layout/Scroll/Content/Features/List/Gark/Icon"]
+custom_minimum_size = Vector2(22, 22)
+layout_mode = 2
+self_modulate = Color(0.36, 0.73, 1, 1)
+texture = ExtResource("5_gark")
+expand_mode = 1
+stretch_mode = 5
+
+[node name="Text" type="VBoxContainer" parent="Inset/Shell/Margin/Layout/Scroll/Content/Features/List/Gark"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 4
+
+[node name="Title" type="Label" parent="Inset/Shell/Margin/Layout/Scroll/Content/Features/List/Gark/Text"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.92, 0.94, 0.96, 1)
+theme_override_font_sizes/font_size = 16
+text = "Meet Gark: bring your own AI agent."
+autowrap_mode = 3
+
+[node name="Description" type="Label" parent="Inset/Shell/Margin/Layout/Scroll/Content/Features/List/Gark/Text"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.65, 0.69, 0.74, 1)
+theme_override_font_sizes/font_size = 14
+text = "Connect Claude Code, Codex, Cursor or any MCP agent to Creator. It builds worlds, writes scripts and playtests your game with you."
+autowrap_mode = 3
+
+[node name="VibeScript" type="HBoxContainer" parent="Inset/Shell/Margin/Layout/Scroll/Content/Features/List"]
+layout_mode = 2
+theme_override_constants/separation = 14
+
+[node name="Icon" type="PanelContainer" parent="Inset/Shell/Margin/Layout/Scroll/Content/Features/List/VibeScript"]
+custom_minimum_size = Vector2(42, 42)
+layout_mode = 2
+size_flags_vertical = 0
+theme_override_styles/panel = SubResource("Style_icon")
+
+[node name="Texture" type="TextureRect" parent="Inset/Shell/Margin/Layout/Scroll/Content/Features/List/VibeScript/Icon"]
+custom_minimum_size = Vector2(22, 22)
+layout_mode = 2
+self_modulate = Color(0.36, 0.73, 1, 1)
+texture = ExtResource("6_code")
+expand_mode = 1
+stretch_mode = 5
+
+[node name="Text" type="VBoxContainer" parent="Inset/Shell/Margin/Layout/Scroll/Content/Features/List/VibeScript"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 4
+
+[node name="Title" type="Label" parent="Inset/Shell/Margin/Layout/Scroll/Content/Features/List/VibeScript/Text"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.92, 0.94, 0.96, 1)
+theme_override_font_sizes/font_size = 16
+text = "Your words. Playable logic."
+autowrap_mode = 3
+
+[node name="Description" type="Label" parent="Inset/Shell/Margin/Layout/Scroll/Content/Features/List/VibeScript/Text"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.65, 0.69, 0.74, 1)
+theme_override_font_sizes/font_size = 14
+text = "Write scripts in natural language with VibeScript. VibeCompile 6 Ultra (Fast) synthesizes them into bytecode."
+autowrap_mode = 3
+
+[node name="Footer" type="HBoxContainer" parent="Inset/Shell/Margin/Layout"]
+layout_mode = 2
+theme_override_constants/separation = 16
+
+[node name="Hint" type="Label" parent="Inset/Shell/Margin/Layout/Footer"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_colors/font_color = Color(0.54, 0.58, 0.63, 1)
+theme_override_font_sizes/font_size = 13
+text = "Your idea. Your next game."
+autowrap_mode = 3
+
+[node name="Start" type="Button" parent="Inset/Shell/Margin/Layout/Footer"]
+layout_mode = 2
+mouse_default_cursor_shape = 2
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+theme_override_colors/font_focus_color = Color(1, 1, 1, 1)
+theme_override_colors/font_hover_color = Color(1, 1, 1, 1)
+theme_override_colors/font_pressed_color = Color(1, 1, 1, 1)
+theme_override_font_sizes/font_size = 15
+theme_override_styles/normal = SubResource("Style_primary")
+theme_override_styles/hover = SubResource("Style_primary_hover")
+theme_override_styles/pressed = SubResource("Style_primary_pressed")
+theme_override_styles/focus = SubResource("Style_focus")
+text = "Start creating   →"
+

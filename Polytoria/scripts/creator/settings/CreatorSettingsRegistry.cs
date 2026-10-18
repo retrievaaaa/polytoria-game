@@ -21,7 +21,8 @@ public static class CreatorSettingsRegistry
 		new() { Key = "backup", Label = "Backup", IconPath = DefaultSectionIcon, SortOrder = 5 },
 		new() { Key = "code_editor", Label = "Code Editor", IconPath = DefaultSectionIcon, SortOrder = 6 },
 		new() { Key = "popups", Label = "Popups", IconPath = DefaultSectionIcon, SortOrder = 7 },
-		new() { Key = "advanced", Label = "Advanced", IconPath = DefaultSectionIcon, SortOrder = 8 }
+		new() { Key = "advanced", Label = "Advanced", IconPath = DefaultSectionIcon, SortOrder = 8 },
+		new() { Key = "gark", Label = "Gark", IconPath = "res://assets/textures/creator/gark.png", SortOrder = 9 }
 	];
 
 	public static readonly IReadOnlyDictionary<string, SettingDef> Definitions = Build();
@@ -30,6 +31,26 @@ public static class CreatorSettingsRegistry
 	{
 		var defs = new Dictionary<string, SettingDef>();
 		SharedSettingsRegistry.AddSharedTo(defs);
+
+		defs.Add(CreatorSettingKeys.Gark.McpEnabled, new SettingDef<bool>
+		{
+			Key = CreatorSettingKeys.Gark.McpEnabled, SectionKey = "gark", Label = "MCP server",
+			Description = "Let AI agents on this computer (Claude Code, Codex, Cursor, VS Code and others) use Creator through the Gark MCP server. Only programs on this computer can connect.",
+			ValueKind = SettingValueKind.Bool, ControlKind = SettingControlKind.Toggle, DefaultValue = false
+		});
+		defs.Add(CreatorSettingKeys.Gark.McpPort, new SettingDef<int>
+		{
+			Key = CreatorSettingKeys.Gark.McpPort, SectionKey = "gark", Label = "MCP port",
+			Description = "Local port for http://127.0.0.1:<port>/mcp. Change it if another program already uses it.",
+			ValueKind = SettingValueKind.Int, ControlKind = SettingControlKind.Slider, DefaultValue = 47830,
+			MinValue = 1024, MaxValue = 65535, Step = 1
+		});
+		defs.Add(CreatorSettingKeys.Gark.McpAllowEdits, new SettingDef<bool>
+		{
+			Key = CreatorSettingKeys.Gark.McpAllowEdits, SectionKey = "gark", Label = "Allow agents to edit",
+			Description = "When off, agents can read the project, capture views and run playtests, but cannot change worlds or scripts.",
+			ValueKind = SettingValueKind.Bool, ControlKind = SettingControlKind.Toggle, DefaultValue = true
+		});
 
 		// Creator
 		defs.Add(CreatorSettingKeys.Creator.OpenWebAfterPublish,

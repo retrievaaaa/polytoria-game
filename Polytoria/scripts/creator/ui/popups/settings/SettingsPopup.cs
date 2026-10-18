@@ -29,6 +29,7 @@ public sealed partial class SettingsPopup : PopupWindowBase
 	private readonly Dictionary<TreeItem, string> _itemToSectionKey = [];
 	private readonly Dictionary<string, List<Control>> _sectionUIs = [];
 	private string _activeSection = string.Empty;
+	public string InitialSection { get; set; } = "";
 
 	public override void _Ready()
 	{
@@ -44,6 +45,7 @@ public sealed partial class SettingsPopup : PopupWindowBase
 			_itemToSectionKey[ch] = section.Key;
 
 			firstSelected ??= ch;
+			if (section.Key == InitialSection) firstSelected = ch;
 		}
 
 		_categoryTree.ItemSelected += OnItemSelected;
